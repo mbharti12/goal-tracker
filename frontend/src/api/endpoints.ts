@@ -1,0 +1,102 @@
+import { apiRequest } from "./client";
+import type {
+  CalendarDayRead,
+  ConditionCreate,
+  ConditionRead,
+  DayConditionRead,
+  DayConditionsUpdate,
+  DayEntryRead,
+  DayNoteUpdate,
+  DayRead,
+  GoalCreate,
+  GoalRead,
+  GoalUpdate,
+  HealthResponse,
+  ReviewFilterRequest,
+  ReviewFilterResponse,
+  ReviewQueryRequest,
+  ReviewQueryResponse,
+  TagCreate,
+  TagEventCreate,
+  TagEventDeleteResponse,
+  TagEventRead,
+  TagRead,
+} from "./types";
+
+export const getHealth = () => apiRequest<HealthResponse>("/health");
+
+export const listGoals = () => apiRequest<GoalRead[]>("/goals");
+
+export const createGoal = (payload: GoalCreate) =>
+  apiRequest<GoalRead>("/goals", { method: "POST", body: payload });
+
+export const updateGoal = (goalId: number, payload: GoalUpdate) =>
+  apiRequest<GoalRead>(`/goals/${goalId}`, { method: "PUT", body: payload });
+
+export const deleteGoal = (goalId: number) =>
+  apiRequest<GoalRead>(`/goals/${goalId}`, { method: "DELETE" });
+
+export const listTags = (options?: { includeInactive?: boolean }) => {
+  const params = new URLSearchParams();
+  if (options?.includeInactive) {
+    params.set("include_inactive", "true");
+  }
+  const suffix = params.toString();
+  return apiRequest<TagRead[]>(suffix ? `/tags?${suffix}` : "/tags");
+};
+
+export const createTag = (payload: TagCreate) =>
+  apiRequest<TagRead>("/tags", { method: "POST", body: payload });
+
+export const deactivateTag = (tagId: number) =>
+  apiRequest<TagRead>(`/tags/${tagId}/deactivate`, { method: "PUT" });
+
+export const reactivateTag = (tagId: number) =>
+  apiRequest<TagRead>(`/tags/${tagId}/reactivate`, { method: "PUT" });
+
+export const deleteTagHard = (tagId: number) =>
+  apiRequest<TagRead>(`/tags/${tagId}`, { method: "DELETE" });
+
+export const listConditions = () => apiRequest<ConditionRead[]>("/conditions");
+
+export const createCondition = (payload: ConditionCreate) =>
+  apiRequest<ConditionRead>("/conditions", { method: "POST", body: payload });
+
+export const getDay = (date: string) => apiRequest<DayRead>(`/days/${date}`);
+
+export const getCalendar = (start: string, end: string) => {
+  const params = new URLSearchParams({ start, end });
+  return apiRequest<CalendarDayRead[]>(`/calendar?${params.toString()}`);
+};
+
+export const upsertDayNote = (date: string, payload: DayNoteUpdate) =>
+  apiRequest<DayEntryRead>(`/days/${date}/note`, { method: "PUT", body: payload });
+
+export const upsertDayConditions = (date: string, payload: DayConditionsUpdate) =>
+  apiRequest<DayConditionRead[]>(`/days/${date}/conditions`, {
+    method: "PUT",
+    body: payload,
+  });
+
+export const createTagEvent = (date: string, payload: TagEventCreate) =>
+  apiRequest<TagEventRead>(`/days/${date}/tag-events`, {
+    method: "POST",
+    body: payload,
+  });
+
+export const deleteTagEvent = (eventId: number) =>
+  apiRequest<TagEventDeleteResponse>(`/tag-events/${eventId}`, {
+    method: "DELETE",
+  });
+
+export const reviewQuery = (payload: ReviewQueryRequest) =>
+  apiRequest<ReviewQueryResponse>("/review/query", {
+    method: "POST",
+    body: payload,
+  });
+
+export const reviewFilter = (payload: ReviewFilterRequest) =>
+  apiRequest<ReviewFilterResponse>("/review/filter", {
+    method: "POST",
+    body: payload,
+  });

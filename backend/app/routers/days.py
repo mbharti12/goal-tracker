@@ -1,0 +1,296 @@
+from __future__ import annotations
+
+from collections import defaultdict
+from datetime import datetime, timedelta
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from sqlmodel import Session, select
+
+from ..db import get_session
+from ..models import Condition, DayCondition, DayEntry, Tag, TagEvent
+from ..schemas import (
+    CalendarDayRead,
+    DayConditionRead,
+    DayConditionsUpdate,
+    DayEntryRead,
+    DayNoteUpdate,
+    DayRead,
+    TagCreate,
+    TagEventCreate,
+    TagEventDeleteResponse,
+    TagEventRead,
+)
+from ..services import scoring, tag_service
+
+router = APIRouter(tags=["days"])
+
+
+def _parse_date(date_str: str) -> str:
+    try:
+        datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid date format. Expected YYYY-MM-DD.",
+        ) from exc
+    return date_str
+
+
+def _load_day_conditions(session: Session, date_str: str) -> List[DayConditionRead]:
+    rows = session.exec(
+        select(DayCondition, Condition)
+        .join(Condition, DayCondition.condition_id == Condition.id)
+        .where(DayCondition.date == date_str)
+        .order_by(DayCondition.condition_id)
+    ).all()
+    return [
+        DayConditionRead(
+            condition_id=day_condition.condition_id,
+            name=condition.name,
+            value=day_condition.value,
+        )
+        for day_condition, condition in rows
+    ]
+
+
+def _load_tag_events(session: Session, date_str: str) -> List[TagEventRead]:
+    rows = session.exec(
+        select(TagEvent, Tag)
+        .join(Tag, TagEvent.tag_id == Tag.id)
+        .where(TagEvent.date == date_str)
+        .order_by(TagEvent.ts, TagEvent.id)
+    ).all()
+    return [
+        TagEventRead(
+            id=event.id,
+            date=event.date,
+            tag_id=event.tag_id,
+            tag_name=tag.name,
+            ts=event.ts,
+            count=event.count,
+            note=event.note,
+        )
+        for event, tag in rows
+    ]
+
+
+@router.get("/days/{date}", response_model=DayRead)
+def get_day(
+    date: str = Path(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    session: Session = Depends(get_session),
+) -> DayRead:
+    date_str = _parse_date(date)
+    day_entry = session.get(DayEntry, date_str)
+    conditions = _load_day_conditions(session, date_str)
+    tag_events = _load_tag_events(session, date_str)
+    goals = scoring.compute_goal_statuses_for_date(session, date_str)
+    return DayRead(
+        day_entry=day_entry,
+        conditions=conditions,
+        tag_events=tag_events,
+        goals=goals,
+    )
+
+
+@router.get("/calendar", response_model=List[CalendarDayRead])
+def get_calendar(
+    start: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    end: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    session: Session = Depends(get_session),
+) -> List[CalendarDayRead]:
+    start_str = _parse_date(start)
+    end_str = _parse_date(end)
+
+    start_day = datetime.strptime(start_str, "%Y-%m-%d").date()
+    end_day = datetime.strptime(end_str, "%Y-%m-%d").date()
+    if start_day > end_day:
+        raise HTTPException(status_code=400, detail="start must be <= end")
+
+    dates: List[str] = []
+    current = start_day
+    while current <= end_day:
+        dates.append(current.isoformat())
+        current += timedelta(days=1)
+
+    condition_rows = session.exec(
+        select(DayCondition, Condition)
+        .join(Condition, DayCondition.condition_id == Condition.id)
+        .where(
+            DayCondition.date >= start_str,
+            DayCondition.date <= end_str,
+            DayCondition.value == True,
+        )
+        .order_by(DayCondition.date, DayCondition.condition_id)
+    ).all()
+    conditions_by_date = defaultdict(list)
+    for day_condition, condition in condition_rows:
+        conditions_by_date[day_condition.date].append(
+            {
+                "condition_id": day_condition.condition_id,
+                "name": condition.name,
+                "value": True,
+            }
+        )
+
+    tag_rows = session.exec(
+        select(TagEvent, Tag)
+        .join(Tag, TagEvent.tag_id == Tag.id)
+        .where(TagEvent.date >= start_str, TagEvent.date <= end_str)
+    ).all()
+    tag_counts = defaultdict(int)
+    tag_names = {}
+    for event, tag in tag_rows:
+        tag_counts[(event.date, event.tag_id)] += event.count
+        tag_names[event.tag_id] = tag.name
+
+    tags_by_date = defaultdict(list)
+    for (date_str, tag_id), count in sorted(tag_counts.items()):
+        tags_by_date[date_str].append(
+            {"tag_id": tag_id, "name": tag_names[tag_id], "count": count}
+        )
+
+    calendar: List[CalendarDayRead] = []
+    for date_str in dates:
+        summary = scoring.compute_day_summary(session, date_str)
+        calendar.append(
+            CalendarDayRead(
+                date=date_str,
+                applicable_goals=summary["applicable_goals"],
+                met_goals=summary["met_goals"],
+                completion_ratio=summary["completion_ratio"],
+                conditions=conditions_by_date.get(date_str, []),
+                tags=tags_by_date.get(date_str, []),
+            )
+        )
+
+    return calendar
+
+
+@router.put("/days/{date}/note", response_model=DayEntryRead)
+def upsert_day_note(
+    note_in: DayNoteUpdate,
+    date: str = Path(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    session: Session = Depends(get_session),
+) -> DayEntryRead:
+    date_str = _parse_date(date)
+    day_entry = session.get(DayEntry, date_str)
+    if day_entry is None:
+        day_entry = DayEntry(date=date_str, note=note_in.note)
+        session.add(day_entry)
+        session.commit()
+        session.refresh(day_entry)
+        return day_entry
+
+    if day_entry.note != note_in.note:
+        day_entry.note = note_in.note
+        day_entry.updated_at = datetime.utcnow()
+        session.add(day_entry)
+        session.commit()
+        session.refresh(day_entry)
+    return day_entry
+
+
+@router.put("/days/{date}/conditions", response_model=List[DayConditionRead])
+def upsert_day_conditions(
+    payload: DayConditionsUpdate,
+    date: str = Path(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    session: Session = Depends(get_session),
+) -> List[DayConditionRead]:
+    date_str = _parse_date(date)
+    condition_ids = [item.condition_id for item in payload.conditions]
+    if not condition_ids:
+        return _load_day_conditions(session, date_str)
+
+    if condition_ids:
+        existing_ids = set(
+            session.exec(
+                select(Condition.id).where(Condition.id.in_(condition_ids))
+            ).all()
+        )
+        missing_ids = sorted(set(condition_ids) - existing_ids)
+        if missing_ids:
+            missing = ", ".join(str(item) for item in missing_ids)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Condition(s) not found: {missing}",
+            )
+
+    day_entry = session.get(DayEntry, date_str)
+    if day_entry is None:
+        session.add(DayEntry(date=date_str))
+
+    for item in payload.conditions:
+        existing = session.get(DayCondition, (date_str, item.condition_id))
+        if existing is None:
+            session.add(
+                DayCondition(
+                    date=date_str,
+                    condition_id=item.condition_id,
+                    value=item.value,
+                )
+            )
+        else:
+            existing.value = item.value
+            session.add(existing)
+
+    session.commit()
+
+    return _load_day_conditions(session, date_str)
+
+
+@router.post(
+    "/days/{date}/tag-events",
+    response_model=TagEventRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_tag_event(
+    payload: TagEventCreate,
+    date: str = Path(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    session: Session = Depends(get_session),
+) -> TagEventRead:
+    date_str = _parse_date(date)
+    tag: Optional[Tag] = None
+
+    if payload.tag_id is not None:
+        tag = session.get(Tag, payload.tag_id)
+        if tag is None:
+            raise HTTPException(status_code=400, detail="Tag not found")
+    else:
+        tag_name = (payload.tag_name or "").strip()
+        if not tag_name:
+            raise HTTPException(status_code=400, detail="tag_name is required")
+        tag = tag_service.create_tag(session, TagCreate(name=tag_name))
+
+    event = TagEvent(
+        date=date_str,
+        tag_id=tag.id,
+        ts=payload.ts,
+        count=payload.count,
+        note=payload.note,
+    )
+    session.add(event)
+    session.commit()
+    session.refresh(event)
+    return TagEventRead(
+        id=event.id,
+        date=event.date,
+        tag_id=event.tag_id,
+        tag_name=tag.name,
+        ts=event.ts,
+        count=event.count,
+        note=event.note,
+    )
+
+
+@router.delete("/tag-events/{event_id}", response_model=TagEventDeleteResponse)
+def delete_tag_event(
+    event_id: int,
+    session: Session = Depends(get_session),
+) -> TagEventDeleteResponse:
+    event = session.get(TagEvent, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Tag event not found")
+    session.delete(event)
+    session.commit()
+    return TagEventDeleteResponse(deleted=True)
