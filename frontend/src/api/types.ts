@@ -8,6 +8,13 @@ export type HealthResponse = {
   status: string;
 };
 
+export type LlmHealthResponse = {
+  reachable: boolean;
+  model: string;
+  base_url: string;
+  error?: string | null;
+};
+
 type Schemas = components["schemas"];
 
 export type TagCreate = Schemas["TagCreate"];
@@ -35,6 +42,9 @@ export type TagEventDeleteResponse = Schemas["TagEventDeleteResponse"];
 export type CalendarConditionRead = Schemas["CalendarConditionRead"];
 export type CalendarTagRead = Schemas["CalendarTagRead"];
 export type CalendarDayRead = Schemas["CalendarDayRead"];
+export type CalendarWeekRead = Schemas["CalendarWeekRead"];
+export type CalendarMonthRead = Schemas["CalendarMonthRead"];
+export type CalendarSummaryRead = Schemas["CalendarSummaryRead"];
 export type QueryPlan = Schemas["QueryPlan"];
 export type ReviewQueryRequest = Schemas["ReviewQueryRequest"];
 export type ReviewFilterRequest = Schemas["ReviewFilterRequest"];

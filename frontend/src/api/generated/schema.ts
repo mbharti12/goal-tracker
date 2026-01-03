@@ -9,6 +9,10 @@ export interface paths {
     /** Health Check */
     get: operations["health_check_health_get"];
   };
+  "/llm/health": {
+    /** Llm Health Check */
+    get: operations["llm_health_check_llm_health_get"];
+  };
   "/goals": {
     /** List Goals */
     get: operations["list_goals_goals_get"];
@@ -52,6 +56,10 @@ export interface paths {
   "/calendar": {
     /** Get Calendar */
     get: operations["get_calendar_calendar_get"];
+  };
+  "/calendar/summary": {
+    /** Get Calendar Summary */
+    get: operations["get_calendar_summary_calendar_summary_get"];
   };
   "/days/{date}/note": {
     /** Upsert Day Note */
@@ -107,6 +115,28 @@ export interface components {
       /** Tags */
       tags?: components["schemas"]["CalendarTagRead"][];
     };
+    /** CalendarMonthRead */
+    CalendarMonthRead: {
+      /** Start */
+      start: string;
+      /** End */
+      end: string;
+      /** Applicable Goals */
+      applicable_goals: number;
+      /** Met Goals */
+      met_goals: number;
+      /** Completion Ratio */
+      completion_ratio: number;
+    };
+    /** CalendarSummaryRead */
+    CalendarSummaryRead: {
+      /** Days */
+      days?: components["schemas"]["CalendarDayRead"][];
+      /** Weeks */
+      weeks?: components["schemas"]["CalendarWeekRead"][];
+      /** Months */
+      months?: components["schemas"]["CalendarMonthRead"][];
+    };
     /** CalendarTagRead */
     CalendarTagRead: {
       /** Tag Id */
@@ -115,6 +145,19 @@ export interface components {
       name: string;
       /** Count */
       count: number;
+    };
+    /** CalendarWeekRead */
+    CalendarWeekRead: {
+      /** Start */
+      start: string;
+      /** End */
+      end: string;
+      /** Applicable Goals */
+      applicable_goals: number;
+      /** Met Goals */
+      met_goals: number;
+      /** Completion Ratio */
+      completion_ratio: number;
     };
     /** ConditionCreate */
     ConditionCreate: {
@@ -278,6 +321,17 @@ export interface components {
     HTTPValidationError: {
       /** Detail */
       detail?: components["schemas"]["ValidationError"][];
+    };
+    /** LlmHealthResponse */
+    LlmHealthResponse: {
+      /** Reachable */
+      reachable: boolean;
+      /** Model */
+      model: string;
+      /** Base Url */
+      base_url: string;
+      /** Error */
+      error?: string | null;
     };
     /** QueryPlan */
     QueryPlan: {
@@ -462,7 +516,7 @@ export interface components {
      * TargetWindow
      * @enum {string}
      */
-    TargetWindow: "day" | "week";
+    TargetWindow: "day" | "week" | "month";
     /** ValidationError */
     ValidationError: {
       /** Location */
@@ -495,6 +549,17 @@ export interface operations {
           "application/json": {
             [key: string]: unknown;
           };
+        };
+      };
+    };
+  };
+  /** Llm Health Check */
+  llm_health_check_llm_health_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["LlmHealthResponse"];
         };
       };
     };
@@ -759,6 +824,29 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["CalendarDayRead"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Calendar Summary */
+  get_calendar_summary_calendar_summary_get: {
+    parameters: {
+      query: {
+        start: string;
+        end: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CalendarSummaryRead"];
         };
       };
       /** @description Validation Error */

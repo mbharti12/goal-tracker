@@ -21,6 +21,7 @@ uvicorn app.main:app --reload
 - `DB_URL`: full SQLAlchemy URL (overrides `DB_PATH`).
 - `LOG_LEVEL`: logging level (default `INFO`).
 - `OLLAMA_MODEL`: model name for summaries (default `llama3.2:1b`).
+- `OLLAMA_BASE_URL`: Ollama server URL (default `http://localhost:11434`).
 
 ## Ollama (Local LLM)
 
@@ -36,6 +37,12 @@ Set a different model with `OLLAMA_MODEL`, for example:
 
 ```bash
 export OLLAMA_MODEL=llama3.2:1b
+```
+
+Point at a non-default Ollama host with `OLLAMA_BASE_URL`, for example:
+
+```bash
+export OLLAMA_BASE_URL=http://localhost:11434
 ```
 
 ## Notes

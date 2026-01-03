@@ -38,6 +38,7 @@ const scoringOptions: Array<{ value: ScoringMode; label: string }> = [
 const windowOptions: Array<{ value: TargetWindow; label: string }> = [
   { value: "day", label: "Per day" },
   { value: "week", label: "Per week" },
+  { value: "month", label: "Per month" },
 ];
 
 const createEmptyForm = (): GoalFormState => ({

@@ -1,6 +1,7 @@
 import { apiRequest } from "./client";
 import type {
   CalendarDayRead,
+  CalendarSummaryRead,
   ConditionCreate,
   ConditionRead,
   DayConditionRead,
@@ -12,6 +13,7 @@ import type {
   GoalRead,
   GoalUpdate,
   HealthResponse,
+  LlmHealthResponse,
   ReviewFilterRequest,
   ReviewFilterResponse,
   ReviewQueryRequest,
@@ -24,6 +26,7 @@ import type {
 } from "./types";
 
 export const getHealth = () => apiRequest<HealthResponse>("/health");
+export const getLlmHealth = () => apiRequest<LlmHealthResponse>("/llm/health");
 
 export const listGoals = () => apiRequest<GoalRead[]>("/goals");
 
@@ -67,6 +70,11 @@ export const getDay = (date: string) => apiRequest<DayRead>(`/days/${date}`);
 export const getCalendar = (start: string, end: string) => {
   const params = new URLSearchParams({ start, end });
   return apiRequest<CalendarDayRead[]>(`/calendar?${params.toString()}`);
+};
+
+export const getCalendarSummary = (start: string, end: string) => {
+  const params = new URLSearchParams({ start, end });
+  return apiRequest<CalendarSummaryRead>(`/calendar/summary?${params.toString()}`);
 };
 
 export const upsertDayNote = (date: string, payload: DayNoteUpdate) =>

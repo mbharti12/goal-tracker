@@ -8,9 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlmodel import Session, select
 
 from ..db import get_session
-from ..models import Condition, DayCondition, DayEntry, Tag, TagEvent
+from ..models import Condition, DayCondition, DayEntry, Tag, TagEvent, TargetWindow
 from ..schemas import (
     CalendarDayRead,
+    CalendarMonthRead,
+    CalendarSummaryRead,
+    CalendarWeekRead,
     DayConditionRead,
     DayConditionsUpdate,
     DayEntryRead,
@@ -165,6 +168,121 @@ def get_calendar(
         )
 
     return calendar
+
+
+@router.get("/calendar/summary", response_model=CalendarSummaryRead)
+def get_calendar_summary(
+    start: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    end: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    session: Session = Depends(get_session),
+) -> CalendarSummaryRead:
+    start_str = _parse_date(start)
+    end_str = _parse_date(end)
+
+    start_day = datetime.strptime(start_str, "%Y-%m-%d").date()
+    end_day = datetime.strptime(end_str, "%Y-%m-%d").date()
+    if start_day > end_day:
+        raise HTTPException(status_code=400, detail="start must be <= end")
+
+    dates: List[str] = []
+    current = start_day
+    while current <= end_day:
+        dates.append(current.isoformat())
+        current += timedelta(days=1)
+
+    condition_rows = session.exec(
+        select(DayCondition, Condition)
+        .join(Condition, DayCondition.condition_id == Condition.id)
+        .where(
+            DayCondition.date >= start_str,
+            DayCondition.date <= end_str,
+            DayCondition.value == True,
+        )
+        .order_by(DayCondition.date, DayCondition.condition_id)
+    ).all()
+    conditions_by_date = defaultdict(list)
+    for day_condition, condition in condition_rows:
+        conditions_by_date[day_condition.date].append(
+            {
+                "condition_id": day_condition.condition_id,
+                "name": condition.name,
+                "value": True,
+            }
+        )
+
+    tag_rows = session.exec(
+        select(TagEvent, Tag)
+        .join(Tag, TagEvent.tag_id == Tag.id)
+        .where(TagEvent.date >= start_str, TagEvent.date <= end_str)
+    ).all()
+    tag_counts = defaultdict(int)
+    tag_names = {}
+    for event, tag in tag_rows:
+        tag_counts[(event.date, event.tag_id)] += event.count
+        tag_names[event.tag_id] = tag.name
+
+    tags_by_date = defaultdict(list)
+    for (date_str, tag_id), count in sorted(tag_counts.items()):
+        tags_by_date[date_str].append(
+            {"tag_id": tag_id, "name": tag_names[tag_id], "count": count}
+        )
+
+    week_bounds = {}
+    month_bounds = {}
+    days: List[CalendarDayRead] = []
+    for date_str in dates:
+        summary = scoring.compute_day_summary_for_window(
+            session, date_str, TargetWindow.day
+        )
+        days.append(
+            CalendarDayRead(
+                date=date_str,
+                applicable_goals=summary["applicable_goals"],
+                met_goals=summary["met_goals"],
+                completion_ratio=summary["completion_ratio"],
+                conditions=conditions_by_date.get(date_str, []),
+                tags=tags_by_date.get(date_str, []),
+            )
+        )
+
+        week_start, week_end = scoring.get_week_bounds(date_str)
+        week_bounds[week_start] = week_end
+        month_start, month_end = scoring.get_month_bounds(date_str)
+        month_bounds[month_start] = month_end
+
+    weeks: List[CalendarWeekRead] = []
+    for week_start in sorted(week_bounds.keys()):
+        week_end = week_bounds[week_start]
+        summary = scoring.compute_window_summary(
+            session, week_end.isoformat(), TargetWindow.week
+        )
+        weeks.append(
+            CalendarWeekRead(
+                start=week_start.isoformat(),
+                end=week_end.isoformat(),
+                applicable_goals=summary["applicable_goals"],
+                met_goals=summary["met_goals"],
+                completion_ratio=summary["completion_ratio"],
+            )
+        )
+
+    months: List[CalendarMonthRead] = []
+    for month_start in sorted(month_bounds.keys()):
+        month_end = month_bounds[month_start]
+        summary = scoring.compute_window_summary(
+            session, month_end.isoformat(), TargetWindow.month
+        )
+        months.append(
+            CalendarMonthRead(
+                start=month_start.isoformat(),
+                end=month_end.isoformat(),
+                applicable_goals=summary["applicable_goals"],
+                met_goals=summary["met_goals"],
+                completion_ratio=summary["completion_ratio"],
+            )
+        )
+
+    return CalendarSummaryRead(days=days, weeks=weeks, months=months)
 
 
 @router.put("/days/{date}/note", response_model=DayEntryRead)

@@ -8,6 +8,7 @@ import {
   upsertDayNote,
 } from "../api/endpoints";
 import type { GoalStatus, TagEventRead, TagRead } from "../api/types";
+import { useRefresh } from "../context/RefreshContext";
 import { useSelectedDate } from "../context/SelectedDateContext";
 import { useConditions } from "../hooks/useConditions";
 import { useDay } from "../hooks/useDay";
@@ -40,6 +41,26 @@ const statusLabels: Record<GoalStatus["status"], string> = {
   na: "N/A",
 };
 
+const progressWindowLabels: Record<GoalStatus["target_window"], string> = {
+  day: "daily",
+  week: "week to date",
+  month: "month to date",
+};
+
+const groupLabels: Record<GoalStatus["target_window"], string> = {
+  day: "Daily goals",
+  week: "Weekly goals",
+  month: "Monthly goals",
+};
+
+const groupEmptyLabels: Record<GoalStatus["target_window"], string> = {
+  day: "No daily goals.",
+  week: "No weekly goals.",
+  month: "No monthly goals.",
+};
+
+const goalGroupOrder: GoalStatus["target_window"][] = ["day", "week", "month"];
+
 export default function Today() {
   const { selectedDate, setSelectedDate } = useSelectedDate();
   const [tagQuery, setTagQuery] = useState("");
@@ -47,6 +68,7 @@ export default function Today() {
   const noteTimerRef = useRef<number | null>(null);
   const noteInitializedRef = useRef(false);
   const noteSaveFailedRef = useRef<string | null>(null);
+  const { bumpRefreshToken } = useRefresh();
 
   const { day, setDay, loading: dayLoading, error: dayError, reload: reloadDay } =
     useDay(selectedDate);
@@ -149,6 +171,11 @@ export default function Today() {
     });
   }, [conditions, day]);
 
+  const refreshDerivedData = useCallback(() => {
+    reloadDay();
+    bumpRefreshToken();
+  }, [bumpRefreshToken, reloadDay]);
+
   const handleToggleCondition = useCallback(
     async (conditionId: number) => {
       if (!day) {
@@ -175,6 +202,7 @@ export default function Today() {
         });
         setDay((current) => (current ? { ...current, conditions: response } : current));
         setActionError(null);
+        refreshDerivedData();
       } catch (error) {
         setDay((current) =>
           current ? { ...current, conditions: previousConditions } : current,
@@ -185,7 +213,7 @@ export default function Today() {
         });
       }
     },
-    [conditionSelections, day, selectedDate, setDay],
+    [conditionSelections, day, refreshDerivedData, selectedDate, setDay],
   );
 
   const handleAddTagEvent = useCallback(
@@ -198,10 +226,9 @@ export default function Today() {
               ? { ...current, tag_events: [event, ...current.tag_events] }
               : current,
           );
-        } else {
-          reloadDay();
         }
         setActionError(null);
+        refreshDerivedData();
       } catch (error) {
         setActionError({
           message: getErrorMessage(error),
@@ -209,7 +236,7 @@ export default function Today() {
         });
       }
     },
-    [day, reloadDay, selectedDate, setDay],
+    [day, refreshDerivedData, selectedDate, setDay],
   );
 
   const handleCreateTagAndAdd = useCallback(
@@ -253,6 +280,7 @@ export default function Today() {
       try {
         await deleteTagEvent(eventId);
         setActionError(null);
+        refreshDerivedData();
       } catch (error) {
         setDay((current) => (current ? { ...current, tag_events: previousEvents } : current));
         setActionError({
@@ -261,7 +289,7 @@ export default function Today() {
         });
       }
     },
-    [day, setDay],
+    [day, refreshDerivedData, setDay],
   );
 
   const saveNote = useCallback(
@@ -273,6 +301,7 @@ export default function Today() {
         setLastSavedAt(entry.updated_at);
         noteSaveFailedRef.current = null;
         setActionError(null);
+        refreshDerivedData();
       } catch (error) {
         noteSaveFailedRef.current = nextNote;
         setActionError({
@@ -283,7 +312,7 @@ export default function Today() {
         setIsSavingNote(false);
       }
     },
-    [selectedDate, setDay],
+    [refreshDerivedData, selectedDate, setDay],
   );
 
   useEffect(() => {
@@ -330,6 +359,24 @@ export default function Today() {
   const lastSavedLabel = lastSavedAt ? formatTime(lastSavedAt) : null;
 
   const goals = day?.goals ?? [];
+  const groupedGoals = useMemo(() => {
+    const groups: Record<GoalStatus["target_window"], GoalStatus[]> = {
+      day: [],
+      week: [],
+      month: [],
+    };
+
+    goals.forEach((goal) => {
+      groups[goal.target_window].push(goal);
+    });
+
+    return goalGroupOrder.map((targetWindow) => ({
+      targetWindow,
+      label: groupLabels[targetWindow],
+      emptyLabel: groupEmptyLabels[targetWindow],
+      goals: groups[targetWindow],
+    }));
+  }, [goals]);
 
   return (
     <section className="page today-page">
@@ -510,21 +557,32 @@ export default function Today() {
           ) : goals.length === 0 ? (
             <div className="empty-state">No goal progress for this day.</div>
           ) : (
-            <div className="goal-list">
-              {goals.map((goal: GoalStatus) => (
-                <div key={goal.goal_id} className="goal-row">
-                  <div className="goal-meta">
-                    <div className="goal-name">{goal.goal_name}</div>
-                    <div className="goal-progress">
-                      {goal.progress}/{goal.target}{" "}
-                      <span className="goal-window">
-                        {goal.target_window === "week" ? "weekly" : "daily"}
-                      </span>
+            <div className="goal-group-list">
+              {groupedGoals.map((group) => (
+                <div key={group.targetWindow} className="goal-group">
+                  <div className="goal-group__title">{group.label}</div>
+                  {group.goals.length === 0 ? (
+                    <div className="empty-state">{group.emptyLabel}</div>
+                  ) : (
+                    <div className="goal-list">
+                      {group.goals.map((goal: GoalStatus) => (
+                        <div key={goal.goal_id} className="goal-row">
+                          <div className="goal-meta">
+                            <div className="goal-name">{goal.goal_name}</div>
+                            <div className="goal-progress">
+                              {goal.progress}/{goal.target}{" "}
+                              <span className="goal-window">
+                                {progressWindowLabels[goal.target_window]}
+                              </span>
+                            </div>
+                          </div>
+                          <div className={`goal-status goal-status--${goal.status}`}>
+                            {statusLabels[goal.status]}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                  <div className={`goal-status goal-status--${goal.status}`}>
-                    {statusLabels[goal.status]}
-                  </div>
+                  )}
                 </div>
               ))}
             </div>

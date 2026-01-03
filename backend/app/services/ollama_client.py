@@ -6,8 +6,37 @@ from typing import Dict, List
 import httpx
 from fastapi import HTTPException, status
 
-OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
 DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:1b")
+
+
+def _ollama_unreachable_message(base_url: str) -> str:
+    return f"Ollama is not running at {base_url}. Start it with `ollama serve`."
+
+
+def health_check(timeout: float = 2.0) -> Dict[str, object]:
+    base_url = OLLAMA_BASE_URL
+    payload: Dict[str, object] = {
+        "reachable": False,
+        "model": DEFAULT_MODEL,
+        "base_url": base_url,
+        "error": None,
+    }
+    try:
+        response = httpx.get(
+            f"{base_url}/api/version",
+            timeout=timeout,
+        )
+    except httpx.RequestError as exc:
+        payload["error"] = _ollama_unreachable_message(base_url)
+        return payload
+
+    if response.status_code != 200:
+        payload["error"] = f"Ollama error: {response.text}"
+        return payload
+
+    payload["reachable"] = True
+    return payload
 
 
 def chat(model: str, messages: List[Dict[str, str]], temperature: float = 0.2) -> str:
@@ -26,7 +55,7 @@ def chat(model: str, messages: List[Dict[str, str]], temperature: float = 0.2) -
     except httpx.RequestError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Ollama is not running. Start it with `ollama serve`.",
+            detail=_ollama_unreachable_message(OLLAMA_BASE_URL),
         ) from exc
 
     if response.status_code != 200:

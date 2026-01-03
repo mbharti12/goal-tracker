@@ -37,6 +37,13 @@ class ConditionRead(ConditionBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class LlmHealthResponse(BaseModel):
+    reachable: bool
+    model: str
+    base_url: str
+    error: Optional[str] = None
+
+
 class GoalTagInput(BaseModel):
     tag_id: int
     weight: int = Field(default=1, ge=1)
@@ -176,6 +183,28 @@ class CalendarDayRead(BaseModel):
     completion_ratio: float
     conditions: List[CalendarConditionRead] = Field(default_factory=list)
     tags: List[CalendarTagRead] = Field(default_factory=list)
+
+
+class CalendarWeekRead(BaseModel):
+    start: str
+    end: str
+    applicable_goals: int
+    met_goals: int
+    completion_ratio: float
+
+
+class CalendarMonthRead(BaseModel):
+    start: str
+    end: str
+    applicable_goals: int
+    met_goals: int
+    completion_ratio: float
+
+
+class CalendarSummaryRead(BaseModel):
+    days: List[CalendarDayRead] = Field(default_factory=list)
+    weeks: List[CalendarWeekRead] = Field(default_factory=list)
+    months: List[CalendarMonthRead] = Field(default_factory=list)
 
 
 class QueryPlan(BaseModel):

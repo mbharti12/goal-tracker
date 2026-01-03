@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from calendar import monthrange
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Dict, Iterable, List, Tuple
@@ -14,6 +15,13 @@ def get_week_bounds(date_str: str) -> Tuple[date, date]:
     week_start = day - timedelta(days=day.weekday())
     week_end = week_start + timedelta(days=6)
     return week_start, week_end
+
+
+def get_month_bounds(date_str: str) -> Tuple[date, date]:
+    day = datetime.strptime(date_str, "%Y-%m-%d").date()
+    month_start = day.replace(day=1)
+    month_end = day.replace(day=monthrange(day.year, day.month)[1])
+    return month_start, month_end
 
 
 def _load_goals(session: Session) -> List[Goal]:
@@ -57,11 +65,10 @@ def _load_day_conditions(session: Session, date_str: str) -> Dict[int, bool]:
 
 def _load_tag_events(
     session: Session, tag_ids: Iterable[int], start_date: str, end_date: str
-) -> Tuple[Dict[Tuple[int, str], int], Dict[int, int]]:
+) -> Dict[Tuple[int, str], int]:
     events_by_tag_and_date: Dict[Tuple[int, str], int] = defaultdict(int)
-    events_by_tag_week: Dict[int, int] = defaultdict(int)
     if not tag_ids:
-        return events_by_tag_and_date, events_by_tag_week
+        return events_by_tag_and_date
 
     rows = session.exec(
         select(TagEvent).where(
@@ -72,8 +79,19 @@ def _load_tag_events(
     ).all()
     for row in rows:
         events_by_tag_and_date[(row.tag_id, row.date)] += row.count
-        events_by_tag_week[row.tag_id] += row.count
-    return events_by_tag_and_date, events_by_tag_week
+    return events_by_tag_and_date
+
+
+def _sum_events_by_tag(
+    events_by_tag_and_date: Dict[Tuple[int, str], int],
+    start_date: str,
+    end_date: str,
+) -> Dict[int, int]:
+    totals: Dict[int, int] = defaultdict(int)
+    for (tag_id, event_date), count in events_by_tag_and_date.items():
+        if start_date <= event_date <= end_date:
+            totals[tag_id] += count
+    return totals
 
 
 def compute_goal_statuses_for_date(session: Session, date_str: str) -> List[dict]:
@@ -86,13 +104,23 @@ def compute_goal_statuses_for_date(session: Session, date_str: str) -> List[dict
     goal_conditions = _load_goal_conditions(session, goal_ids)
     day_conditions = _load_day_conditions(session, date_str)
 
-    week_start, week_end = get_week_bounds(date_str)
+    week_start, _ = get_week_bounds(date_str)
     week_start_str = week_start.isoformat()
-    week_end_str = week_end.isoformat()
+    month_start, _ = get_month_bounds(date_str)
+    month_start_str = month_start.isoformat()
+    range_start = min(week_start, month_start)
+    range_start_str = range_start.isoformat()
+    range_end_str = date_str
 
     tag_ids = {tag_id for tags in goal_tags.values() for tag_id in tags.keys()}
-    events_by_tag_and_date, events_by_tag_week = _load_tag_events(
-        session, tag_ids, week_start_str, week_end_str
+    events_by_tag_and_date = _load_tag_events(
+        session, tag_ids, range_start_str, range_end_str
+    )
+    events_by_tag_week = _sum_events_by_tag(
+        events_by_tag_and_date, week_start_str, date_str
+    )
+    events_by_tag_month = _sum_events_by_tag(
+        events_by_tag_and_date, month_start_str, date_str
     )
 
     statuses: List[dict] = []
@@ -113,6 +141,9 @@ def compute_goal_statuses_for_date(session: Session, date_str: str) -> List[dict
             if goal.target_window == TargetWindow.week:
                 for tag_id, weight in tag_weights.items():
                     progress += events_by_tag_week.get(tag_id, 0) * weight
+            elif goal.target_window == TargetWindow.month:
+                for tag_id, weight in tag_weights.items():
+                    progress += events_by_tag_month.get(tag_id, 0) * weight
             else:
                 for tag_id, weight in tag_weights.items():
                     progress += (
@@ -146,12 +177,43 @@ def compute_goal_statuses_for_date(session: Session, date_str: str) -> List[dict
 
 def compute_day_summary(session: Session, date_str: str) -> dict:
     goal_statuses = compute_goal_statuses_for_date(session, date_str)
+    summary = summarize_goal_statuses(goal_statuses)
+    summary["date"] = date_str
+    return summary
+
+
+def summarize_goal_statuses(goal_statuses: Iterable[dict]) -> dict:
     applicable_goals = sum(1 for goal in goal_statuses if goal["applicable"])
     met_goals = sum(1 for goal in goal_statuses if goal["status"] == "met")
     completion_ratio = met_goals / applicable_goals if applicable_goals else 0
     return {
-        "date": date_str,
         "applicable_goals": applicable_goals,
         "met_goals": met_goals,
         "completion_ratio": completion_ratio,
     }
+
+
+def compute_day_summary_for_window(
+    session: Session, date_str: str, target_window: TargetWindow
+) -> dict:
+    goal_statuses = compute_goal_statuses_for_date(session, date_str)
+    filtered = [
+        goal
+        for goal in goal_statuses
+        if goal["target_window"] == target_window.value
+    ]
+    summary = summarize_goal_statuses(filtered)
+    summary["date"] = date_str
+    return summary
+
+
+def compute_window_summary(
+    session: Session, date_str: str, target_window: TargetWindow
+) -> dict:
+    goal_statuses = compute_goal_statuses_for_date(session, date_str)
+    filtered = [
+        goal
+        for goal in goal_statuses
+        if goal["target_window"] == target_window.value
+    ]
+    return summarize_goal_statuses(filtered)

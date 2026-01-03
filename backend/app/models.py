@@ -8,6 +8,7 @@ from sqlmodel import Field, Relationship, SQLModel
 class TargetWindow(str, Enum):
     day = "day"
     week = "week"
+    month = "month"
 
 
 class ScoringMode(str, Enum):

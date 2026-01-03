@@ -6,6 +6,7 @@ from sqlmodel import create_engine
 
 from app.db import init_db
 from app.main import create_app
+from app.services import ollama_client
 
 
 @pytest.mark.anyio
@@ -27,7 +28,7 @@ async def test_review_query_and_filter(tmp_path, respx_mock):
         "goals": None,
         "intent": "summary",
     }
-    respx_mock.post("http://localhost:11434/api/chat").mock(
+    respx_mock.post(f"{ollama_client.OLLAMA_BASE_URL}/api/chat").mock(
         side_effect=[
             httpx.Response(
                 200, json={"message": {"content": json.dumps(plan_payload)}}
@@ -96,7 +97,7 @@ async def test_review_query_invalid_plan_falls_back(tmp_path, respx_mock):
     app = create_app(engine_override=engine)
     init_db()
 
-    respx_mock.post("http://localhost:11434/api/chat").mock(
+    respx_mock.post(f"{ollama_client.OLLAMA_BASE_URL}/api/chat").mock(
         side_effect=[
             httpx.Response(200, json={"message": {"content": "not json"}}),
             httpx.Response(

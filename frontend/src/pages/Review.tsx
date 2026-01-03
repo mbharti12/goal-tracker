@@ -1,7 +1,8 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, getErrorMessage } from "../api/client";
-import { getCalendar, getDay, reviewFilter, reviewQuery } from "../api/endpoints";
-import type { ReviewDebug } from "../api/types";
+import { getCalendar, getDay, getLlmHealth, reviewFilter, reviewQuery } from "../api/endpoints";
+import type { LlmHealthResponse, ReviewDebug } from "../api/types";
+import { useRefresh } from "../context/RefreshContext";
 import { useConditions } from "../hooks/useConditions";
 import { useGoals } from "../hooks/useGoals";
 import { addDays, formatDateInput, listDateRange, parseDateInput } from "../utils/date";
@@ -17,6 +18,35 @@ const DOW_OPTIONS = [
 ];
 
 const DOW_BY_INDEX = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const DEFAULT_OLLAMA_MODEL = "llama3.2:1b";
+const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
+
+type LlmHealthState = {
+  loading: boolean;
+  data: LlmHealthResponse | null;
+  error: string | null;
+};
+
+type OllamaHelpProps = {
+  model: string;
+};
+
+const OllamaHelp = ({ model }: OllamaHelpProps) => (
+  <div className="review-help">
+    <div>To enable the local model:</div>
+    <ul>
+      <li>
+        Install Ollama: <code>brew install ollama</code>
+      </li>
+      <li>
+        Start the server: <code>ollama serve</code>
+      </li>
+      <li>
+        Pull the model: <code>ollama pull {model}</code>
+      </li>
+    </ul>
+  </div>
+);
 
 export default function Review() {
   const todayLabel = formatDateInput(new Date());
@@ -40,8 +70,15 @@ export default function Review() {
   const [aiDebug, setAiDebug] = useState<ReviewDebug | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [llmHealth, setLlmHealth] = useState<LlmHealthState>({
+    loading: true,
+    data: null,
+    error: null,
+  });
   const [showOllamaHelp, setShowOllamaHelp] = useState(false);
   const [lastQueryLabel, setLastQueryLabel] = useState<string | null>(null);
+  const { refreshToken } = useRefresh();
+  const lastRefreshTokenRef = useRef(refreshToken);
 
   const {
     conditions,
@@ -51,6 +88,33 @@ export default function Review() {
   } = useConditions();
   const { goals, loading: goalsLoading, error: goalsError, reload: reloadGoals } =
     useGoals();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const data = await getLlmHealth();
+        if (!cancelled) {
+          setLlmHealth({ loading: false, data, error: null });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setLlmHealth({
+            loading: false,
+            data: null,
+            error: getErrorMessage(error),
+          });
+        }
+      }
+    };
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const sortedConditions = useMemo(
     () => [...conditions].sort((a, b) => a.name.localeCompare(b.name)),
@@ -215,6 +279,20 @@ export default function Review() {
     }
   }, [filterPayload, rangeValid]);
 
+  useEffect(() => {
+    if (refreshToken === lastRefreshTokenRef.current) {
+      return;
+    }
+    if (previewLoading) {
+      return;
+    }
+    lastRefreshTokenRef.current = refreshToken;
+    if (!previewMeta && previewDates.length === 0) {
+      return;
+    }
+    handlePreview();
+  }, [handlePreview, previewDates.length, previewLoading, previewMeta, refreshToken]);
+
   const runQuery = useCallback(async (prompt: string, label: string) => {
     const trimmed = prompt.trim();
     if (!trimmed) {
@@ -260,6 +338,44 @@ export default function Review() {
     previewDates.length > 0
       ? `${previewDates.length} day${previewDates.length === 1 ? "" : "s"} included`
       : "No dates selected yet.";
+
+  const llmModel = llmHealth.data?.model ?? DEFAULT_OLLAMA_MODEL;
+  const llmBaseUrl = llmHealth.data?.base_url ?? DEFAULT_OLLAMA_BASE_URL;
+
+  const renderLlmStatus = () => {
+    if (llmHealth.loading) {
+      return <div className="status status--loading">Checking LLM...</div>;
+    }
+
+    if (llmHealth.error) {
+      return (
+        <div className="status status--error" role="alert">
+          <span>LLM status unavailable.</span>
+          <span className="status-detail">{llmHealth.error}</span>
+        </div>
+      );
+    }
+
+    if (llmHealth.data?.reachable) {
+      return (
+        <div className="status status--ok">
+          <span>LLM ready.</span>
+          <span className="status-detail">Model: {llmModel}</span>
+          <span className="status-detail">Ollama: {llmBaseUrl}</span>
+        </div>
+      );
+    }
+
+    return (
+      <div className="status status--error" role="alert">
+        <span>Ollama not running.</span>
+        {llmHealth.data?.error && (
+          <span className="status-detail">{llmHealth.data.error}</span>
+        )}
+        <OllamaHelp model={llmModel} />
+      </div>
+    );
+  };
 
   const debugPlanText = useMemo(
     () => (aiDebug ? JSON.stringify(aiDebug.plan, null, 2) : ""),
@@ -525,20 +641,14 @@ export default function Review() {
 
       <div className="card review-output">
         <h2>AI response</h2>
+        {renderLlmStatus()}
         {aiLoading ? (
           <div className="status status--loading">Waiting for AI response...</div>
         ) : aiError ? (
           <div className="status status--error" role="alert">
             <div>{aiError}</div>
             {showOllamaHelp && (
-              <div className="review-help">
-                <div>To enable the local model:</div>
-                <ul>
-                  <li>Install Ollama</li>
-                  <li>Run: ollama serve</li>
-                  <li>Run: ollama pull llama3.2:1b</li>
-                </ul>
-              </div>
+              <OllamaHelp model={llmModel} />
             )}
           </div>
         ) : aiAnswer ? (

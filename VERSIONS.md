@@ -13,7 +13,25 @@ Release date: YYYY-MM-DD
 ### Added
 ### Changed
 ### Fixed
+- [x] Weekly/monthly progress now computes to the selected date instead of full window totals
 ### Removed
+
+## v1.5 (YYYY-MM-DD)
+
+Release date: YYYY-MM-DD
+
+### Added
+- [x] Calendar summary endpoint for daily-only cells plus weekly/monthly aggregates
+- [x] Monthly goal target window supported in creation, scoring, and progress views
+- [x] Journal backup/export workflow for saving or sharing journal notes
+- [x] LLM health endpoint with model/base URL diagnostics plus frontend status panel
+- [x] Easier LLM setup with base URL configuration surfaced in env/example and docs
+
+### Changed
+- [x] Calendar and today views split daily vs weekly progress, with monthly rollups.
+- [x] Auto-refresh after actions to keep goal status and calendar aggregates current.
+
+### Fixed
 
 ## v1.0 (current)
 
