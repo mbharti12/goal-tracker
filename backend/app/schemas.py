@@ -119,6 +119,19 @@ class DayConditionInput(BaseModel):
     value: bool
 
 
+class GoalStatusRead(BaseModel):
+    goal_id: int
+    goal_name: str
+    applicable: bool
+    status: Literal["met", "partial", "missed", "na"]
+    progress: float
+    target: int
+    samples: int
+    window_days: int
+    target_window: TargetWindow
+    scoring_mode: ScoringMode
+
+
 class DayConditionsUpdate(BaseModel):
     conditions: List[DayConditionInput] = Field(default_factory=list)
 
@@ -127,6 +140,22 @@ class DayConditionRead(BaseModel):
     condition_id: int
     name: str
     value: bool
+
+
+class DayGoalRatingInput(BaseModel):
+    goal_id: int
+    rating: int = Field(ge=1, le=100)
+    note: Optional[str] = None
+
+
+class DayGoalRatingsUpdate(BaseModel):
+    ratings: List[DayGoalRatingInput] = Field(default_factory=list)
+
+
+class DayGoalRatingRead(BaseModel):
+    goal_id: int
+    rating: int
+    note: Optional[str] = None
 
 
 class TagEventCreate(BaseModel):
@@ -157,11 +186,31 @@ class TagEventDeleteResponse(BaseModel):
     deleted: bool
 
 
+class NotificationRead(BaseModel):
+    id: int
+    created_at: datetime
+    type: str
+    title: str
+    body: str
+    read_at: Optional[datetime] = None
+    dedupe_key: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class NotificationMarkRead(BaseModel):
+    id: int
+    read_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class DayRead(BaseModel):
     day_entry: Optional[DayEntryRead] = None
     conditions: List[DayConditionRead] = Field(default_factory=list)
     tag_events: List[TagEventRead] = Field(default_factory=list)
-    goals: List[dict] = Field(default_factory=list)
+    goal_ratings: List[DayGoalRatingRead] = Field(default_factory=list)
+    goals: List[GoalStatusRead] = Field(default_factory=list)
 
 
 class CalendarConditionRead(BaseModel):
@@ -315,7 +364,7 @@ class ReviewDay(BaseModel):
     date: str
     note: Optional[str] = None
     summary: ReviewDaySummary
-    goals: List[dict] = Field(default_factory=list)
+    goals: List[GoalStatusRead] = Field(default_factory=list)
 
 
 class ReviewContext(BaseModel):

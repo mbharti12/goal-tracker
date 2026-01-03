@@ -8,7 +8,16 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlmodel import Session, select
 
 from ..db import get_session
-from ..models import Condition, DayCondition, DayEntry, Tag, TagEvent, TargetWindow
+from ..models import (
+    Condition,
+    DayCondition,
+    DayEntry,
+    Goal,
+    GoalRating,
+    Tag,
+    TagEvent,
+    TargetWindow,
+)
 from ..schemas import (
     CalendarDayRead,
     CalendarMonthRead,
@@ -17,6 +26,8 @@ from ..schemas import (
     DayConditionRead,
     DayConditionsUpdate,
     DayEntryRead,
+    DayGoalRatingRead,
+    DayGoalRatingsUpdate,
     DayNoteUpdate,
     DayRead,
     TagCreate,
@@ -78,6 +89,18 @@ def _load_tag_events(session: Session, date_str: str) -> List[TagEventRead]:
     ]
 
 
+def _load_goal_ratings(session: Session, date_str: str) -> List[DayGoalRatingRead]:
+    rows = session.exec(
+        select(GoalRating)
+        .where(GoalRating.date == date_str)
+        .order_by(GoalRating.goal_id)
+    ).all()
+    return [
+        DayGoalRatingRead(goal_id=row.goal_id, rating=row.rating, note=row.note)
+        for row in rows
+    ]
+
+
 @router.get("/days/{date}", response_model=DayRead)
 def get_day(
     date: str = Path(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
@@ -87,11 +110,13 @@ def get_day(
     day_entry = session.get(DayEntry, date_str)
     conditions = _load_day_conditions(session, date_str)
     tag_events = _load_tag_events(session, date_str)
+    goal_ratings = _load_goal_ratings(session, date_str)
     goals = scoring.compute_goal_statuses_for_date(session, date_str)
     return DayRead(
         day_entry=day_entry,
         conditions=conditions,
         tag_events=tag_events,
+        goal_ratings=goal_ratings,
         goals=goals,
     )
 
@@ -355,6 +380,49 @@ def upsert_day_conditions(
     session.commit()
 
     return _load_day_conditions(session, date_str)
+
+
+@router.put("/days/{date}/ratings", response_model=List[DayGoalRatingRead])
+def upsert_day_ratings(
+    payload: DayGoalRatingsUpdate,
+    date: str = Path(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    session: Session = Depends(get_session),
+) -> List[DayGoalRatingRead]:
+    date_str = _parse_date(date)
+    ratings = payload.ratings
+    if not ratings:
+        return _load_goal_ratings(session, date_str)
+
+    goal_ids = [item.goal_id for item in ratings]
+    existing_ids = set(
+        session.exec(select(Goal.id).where(Goal.id.in_(goal_ids))).all()
+    )
+    missing_ids = sorted(set(goal_ids) - existing_ids)
+    if missing_ids:
+        missing = ", ".join(str(item) for item in missing_ids)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Goal(s) not found: {missing}",
+        )
+
+    for item in ratings:
+        existing = session.get(GoalRating, (date_str, item.goal_id))
+        if existing is None:
+            session.add(
+                GoalRating(
+                    date=date_str,
+                    goal_id=item.goal_id,
+                    rating=item.rating,
+                    note=item.note,
+                )
+            )
+        else:
+            existing.rating = item.rating
+            existing.note = item.note
+            session.add(existing)
+
+    session.commit()
+    return _load_goal_ratings(session, date_str)
 
 
 @router.post(

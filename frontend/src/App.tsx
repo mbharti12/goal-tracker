@@ -1,8 +1,10 @@
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import BottomTabs, { TAB_ITEMS } from "./components/BottomTabs";
+import ToastHost from "./components/ToastHost";
 import Calendar from "./pages/Calendar";
 import Goals from "./pages/Goals";
+import Notifications from "./pages/Notifications";
 import Review from "./pages/Review";
 import Today from "./pages/Today";
 import { getErrorMessage } from "./api/client";
@@ -76,9 +78,11 @@ export default function App() {
           <Route path="/goals" element={<Goals />} />
           <Route path="/calendar" element={<Calendar />} />
           <Route path="/review" element={<Review />} />
+          <Route path="/notifications" element={<Notifications />} />
         </Routes>
       </main>
 
+      <ToastHost />
       <BottomTabs />
     </div>
   );

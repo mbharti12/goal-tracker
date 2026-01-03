@@ -33,6 +33,7 @@ type GoalFormErrors = {
 const scoringOptions: Array<{ value: ScoringMode; label: string }> = [
   { value: "count", label: "Counted progress" },
   { value: "binary", label: "Hit or miss" },
+  { value: "rating", label: "Rating (1–100)" },
 ];
 
 const windowOptions: Array<{ value: TargetWindow; label: string }> = [
@@ -198,9 +199,12 @@ export default function Goals() {
     if (!trimmedName) {
       errors.name = "Name is required.";
     }
+    const isRating = state.scoringMode === "rating";
     const countValue = Number(state.targetCount);
     if (!Number.isFinite(countValue) || !Number.isInteger(countValue) || countValue <= 0) {
       errors.targetCount = "Target must be a whole number greater than zero.";
+    } else if (isRating && (countValue < 1 || countValue > 100)) {
+      errors.targetCount = "Passing threshold must be between 1 and 100.";
     }
     return { errors, countValue };
   }, []);
@@ -379,6 +383,7 @@ export default function Goals() {
   const metaLoading = tagsLoading || conditionsLoading;
   const isCreating = selectedGoalId === "new" || selectedGoalId === null;
   const emptyTagsMessage = showArchivedTags ? "No tags yet." : "No active tags yet.";
+  const isRating = formState.scoringMode === "rating";
 
   return (
     <section className="page">
@@ -546,13 +551,14 @@ export default function Goals() {
             <div className="field-row">
               <div className="field-group">
                 <label className="field-label" htmlFor="goal-target-count">
-                  Target count
+                  {isRating ? "Passing threshold (1–100)" : "Target count"}
                 </label>
                 <input
                   id="goal-target-count"
                   className="field"
                   type="number"
                   min={1}
+                  max={isRating ? 100 : undefined}
                   step={1}
                   value={formState.targetCount}
                   onChange={(event) => {

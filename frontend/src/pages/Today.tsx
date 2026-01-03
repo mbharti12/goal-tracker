@@ -6,13 +6,16 @@ import {
   deleteTagEvent,
   upsertDayConditions,
   upsertDayNote,
+  upsertDayRatings,
 } from "../api/endpoints";
-import type { GoalStatus, TagEventRead, TagRead } from "../api/types";
+import type { DayGoalRatingRead, GoalStatus, TagEventRead, TagRead } from "../api/types";
 import { useRefresh } from "../context/RefreshContext";
 import { useSelectedDate } from "../context/SelectedDateContext";
+import { useToast } from "../context/ToastContext";
 import { useConditions } from "../hooks/useConditions";
 import { useDay } from "../hooks/useDay";
 import { useTags } from "../hooks/useTags";
+import { useAsyncAction } from "../hooks/useAsyncAction";
 import { addDays, parseDateInput } from "../utils/date";
 
 type BannerError = {
@@ -61,6 +64,18 @@ const groupEmptyLabels: Record<GoalStatus["target_window"], string> = {
 
 const goalGroupOrder: GoalStatus["target_window"][] = ["day", "week", "month"];
 
+const clampRating = (value: number) => Math.min(100, Math.max(1, value));
+
+const mergeGoalRatings = (
+  current: DayGoalRatingRead[] | undefined,
+  updates: DayGoalRatingRead[],
+) => {
+  const merged = new Map<number, DayGoalRatingRead>();
+  (current ?? []).forEach((rating) => merged.set(rating.goal_id, rating));
+  updates.forEach((rating) => merged.set(rating.goal_id, rating));
+  return Array.from(merged.values());
+};
+
 export default function Today() {
   const { selectedDate, setSelectedDate } = useSelectedDate();
   const [tagQuery, setTagQuery] = useState("");
@@ -68,7 +83,10 @@ export default function Today() {
   const noteTimerRef = useRef<number | null>(null);
   const noteInitializedRef = useRef(false);
   const noteSaveFailedRef = useRef<string | null>(null);
+  const ratingTimersRef = useRef<Map<number, number>>(new Map());
+  const ratingInitializedRef = useRef(false);
   const { bumpRefreshToken } = useRefresh();
+  const { pushToast } = useToast();
 
   const { day, setDay, loading: dayLoading, error: dayError, reload: reloadDay } =
     useDay(selectedDate);
@@ -85,6 +103,12 @@ export default function Today() {
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [showArchivedTags, setShowArchivedTags] = useState(false);
+  const [ratingDrafts, setRatingDrafts] = useState<Record<number, number | null>>(
+    {},
+  );
+  const [ratingPendingByGoal, setRatingPendingByGoal] = useState<
+    Record<number, boolean>
+  >({});
 
   const loadError = dayError ?? conditionsError ?? tagsError;
   const loadRetry = dayError
@@ -108,6 +132,11 @@ export default function Today() {
       window.clearTimeout(noteTimerRef.current);
       noteTimerRef.current = null;
     }
+    ratingInitializedRef.current = false;
+    setRatingDrafts({});
+    setRatingPendingByGoal({});
+    ratingTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    ratingTimersRef.current.clear();
   }, [selectedDate]);
 
   useEffect(() => {
@@ -122,6 +151,25 @@ export default function Today() {
       setLastSavedAt(day.day_entry.updated_at);
     }
   }, [day]);
+
+  useEffect(() => {
+    if (!day || ratingInitializedRef.current) {
+      return;
+    }
+    const initialRatings: Record<number, number | null> = {};
+    day.goal_ratings?.forEach((rating) => {
+      initialRatings[rating.goal_id] = rating.rating;
+    });
+    setRatingDrafts(initialRatings);
+    ratingInitializedRef.current = true;
+  }, [day]);
+
+  useEffect(() => {
+    return () => {
+      ratingTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      ratingTimersRef.current.clear();
+    };
+  }, []);
 
   const displayDate = useMemo(() => {
     const date = parseDateInput(selectedDate);
@@ -171,6 +219,25 @@ export default function Today() {
     });
   }, [conditions, day]);
 
+  const savedRatingsByGoal = useMemo(() => {
+    const ratings = new Map<number, number>();
+    day?.goal_ratings?.forEach((rating) => {
+      ratings.set(rating.goal_id, rating.rating);
+    });
+    return ratings;
+  }, [day?.goal_ratings]);
+
+  const parseRatingInput = useCallback((value: string) => {
+    if (!value.trim()) {
+      return null;
+    }
+    const parsed = Number(value);
+    if (Number.isNaN(parsed)) {
+      return null;
+    }
+    return clampRating(parsed);
+  }, []);
+
   const refreshDerivedData = useCallback(() => {
     reloadDay();
     bumpRefreshToken();
@@ -203,6 +270,7 @@ export default function Today() {
         setDay((current) => (current ? { ...current, conditions: response } : current));
         setActionError(null);
         refreshDerivedData();
+        pushToast({ type: "success", message: "Condition updated." });
       } catch (error) {
         setDay((current) =>
           current ? { ...current, conditions: previousConditions } : current,
@@ -211,9 +279,10 @@ export default function Today() {
           message: getErrorMessage(error),
           retry: () => handleToggleCondition(conditionId),
         });
+        pushToast({ type: "error", message: "Failed to update condition." });
       }
     },
-    [conditionSelections, day, refreshDerivedData, selectedDate, setDay],
+    [conditionSelections, day, pushToast, refreshDerivedData, selectedDate, setDay],
   );
 
   const handleAddTagEvent = useCallback(
@@ -229,14 +298,16 @@ export default function Today() {
         }
         setActionError(null);
         refreshDerivedData();
+        pushToast({ type: "success", message: "Tag event added." });
       } catch (error) {
         setActionError({
           message: getErrorMessage(error),
           retry: () => handleAddTagEvent(tag),
         });
+        pushToast({ type: "error", message: "Failed to add tag event." });
       }
     },
-    [day, refreshDerivedData, selectedDate, setDay],
+    [day, pushToast, refreshDerivedData, selectedDate, setDay],
   );
 
   const handleCreateTagAndAdd = useCallback(
@@ -261,9 +332,10 @@ export default function Today() {
           message: getErrorMessage(error),
           retry: () => handleCreateTagAndAdd(name),
         });
+        pushToast({ type: "error", message: "Failed to create tag." });
       }
     },
-    [handleAddTagEvent, setTagQuery, setTags],
+    [handleAddTagEvent, pushToast, setTagQuery, setTags],
   );
 
   const handleDeleteTagEvent = useCallback(
@@ -281,15 +353,90 @@ export default function Today() {
         await deleteTagEvent(eventId);
         setActionError(null);
         refreshDerivedData();
+        pushToast({ type: "success", message: "Tag event deleted." });
       } catch (error) {
         setDay((current) => (current ? { ...current, tag_events: previousEvents } : current));
         setActionError({
           message: getErrorMessage(error),
           retry: () => handleDeleteTagEvent(eventId),
         });
+        pushToast({ type: "error", message: "Failed to delete tag event." });
       }
     },
-    [day, refreshDerivedData, setDay],
+    [day, pushToast, refreshDerivedData, setDay],
+  );
+
+  const deleteTagEventAction = useAsyncAction(handleDeleteTagEvent);
+
+  const saveRating = useCallback(
+    async (goalId: number, rating: number) => {
+      setRatingPendingByGoal((prev) => ({ ...prev, [goalId]: true }));
+      try {
+        const response = await upsertDayRatings(selectedDate, {
+          ratings: [{ goal_id: goalId, rating }],
+        });
+        setDay((current) =>
+          current
+            ? {
+                ...current,
+                goal_ratings: mergeGoalRatings(current.goal_ratings, response),
+              }
+            : current,
+        );
+        setActionError(null);
+        refreshDerivedData();
+        pushToast({ type: "success", message: "Rating saved." });
+      } catch (error) {
+        const fallback = savedRatingsByGoal.get(goalId) ?? null;
+        setRatingDrafts((prev) => ({ ...prev, [goalId]: fallback }));
+        setActionError({
+          message: getErrorMessage(error),
+          retry: () => {
+            setRatingDrafts((prev) => ({ ...prev, [goalId]: rating }));
+            void saveRating(goalId, rating);
+          },
+        });
+        pushToast({ type: "error", message: "Failed to save rating." });
+      } finally {
+        setRatingPendingByGoal((prev) => ({ ...prev, [goalId]: false }));
+      }
+    },
+    [
+      pushToast,
+      refreshDerivedData,
+      savedRatingsByGoal,
+      selectedDate,
+      setDay,
+      setRatingPendingByGoal,
+    ],
+  );
+
+  const handleRatingDraftChange = useCallback(
+    (goalId: number, nextValue: number | null) => {
+      setRatingDrafts((prev) => ({ ...prev, [goalId]: nextValue }));
+
+      const existingTimer = ratingTimersRef.current.get(goalId);
+      if (existingTimer) {
+        window.clearTimeout(existingTimer);
+        ratingTimersRef.current.delete(goalId);
+      }
+
+      if (nextValue === null) {
+        return;
+      }
+
+      const savedValue = savedRatingsByGoal.get(goalId);
+      if (savedValue === nextValue) {
+        return;
+      }
+
+      const timer = window.setTimeout(() => {
+        ratingTimersRef.current.delete(goalId);
+        void saveRating(goalId, nextValue);
+      }, 800);
+      ratingTimersRef.current.set(goalId, timer);
+    },
+    [saveRating, savedRatingsByGoal],
   );
 
   const saveNote = useCallback(
@@ -302,17 +449,19 @@ export default function Today() {
         noteSaveFailedRef.current = null;
         setActionError(null);
         refreshDerivedData();
+        pushToast({ type: "success", message: "Note saved." });
       } catch (error) {
         noteSaveFailedRef.current = nextNote;
         setActionError({
           message: getErrorMessage(error),
           retry: () => saveNote(nextNote),
         });
+        pushToast({ type: "error", message: "Failed to save note." });
       } finally {
         setIsSavingNote(false);
       }
     },
-    [refreshDerivedData, selectedDate, setDay],
+    [pushToast, refreshDerivedData, selectedDate, setDay],
   );
 
   useEffect(() => {
@@ -570,14 +719,72 @@ export default function Today() {
                           <div className="goal-meta">
                             <div className="goal-name">{goal.goal_name}</div>
                             <div className="goal-progress">
-                              {goal.progress}/{goal.target}{" "}
-                              <span className="goal-window">
-                                {progressWindowLabels[goal.target_window]}
-                              </span>
+                              {goal.scoring_mode === "rating" ? (
+                                <>
+                                  avg {goal.progress.toFixed(1)} / {goal.target}{" "}
+                                  <span className="goal-window">
+                                    ({goal.samples}/{goal.window_days} rated,{" "}
+                                    {progressWindowLabels[goal.target_window]})
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  {goal.progress}/{goal.target}{" "}
+                                  <span className="goal-window">
+                                    {progressWindowLabels[goal.target_window]}
+                                  </span>
+                                </>
+                              )}
                             </div>
                           </div>
-                          <div className={`goal-status goal-status--${goal.status}`}>
-                            {statusLabels[goal.status]}
+                          <div className="goal-actions">
+                            {goal.scoring_mode === "rating" && (
+                              <div
+                                className="goal-rating"
+                                aria-busy={Boolean(ratingPendingByGoal[goal.goal_id])}
+                              >
+                                <input
+                                  className="field field--compact goal-rating__input"
+                                  type="number"
+                                  min={1}
+                                  max={100}
+                                  step={1}
+                                  inputMode="numeric"
+                                  value={ratingDrafts[goal.goal_id] ?? ""}
+                                  onChange={(event) => {
+                                    const nextValue = parseRatingInput(
+                                      event.target.value,
+                                    );
+                                    handleRatingDraftChange(goal.goal_id, nextValue);
+                                  }}
+                                  onBlur={() => {
+                                    if (ratingDrafts[goal.goal_id] !== null) {
+                                      return;
+                                    }
+                                    const savedValue = savedRatingsByGoal.get(goal.goal_id);
+                                    if (savedValue === undefined) {
+                                      return;
+                                    }
+                                    setRatingDrafts((prev) => ({
+                                      ...prev,
+                                      [goal.goal_id]: savedValue,
+                                    }));
+                                  }}
+                                  placeholder="1-100"
+                                  aria-label={`Rating for ${goal.goal_name}`}
+                                  disabled={
+                                    dayLoading ||
+                                    Boolean(ratingPendingByGoal[goal.goal_id])
+                                  }
+                                />
+                                {ratingPendingByGoal[goal.goal_id] && (
+                                  <span className="goal-rating__status">Saving...</span>
+                                )}
+                              </div>
+                            )}
+                            <div className={`goal-status goal-status--${goal.status}`}>
+                              {statusLabels[goal.status]}
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -634,7 +841,10 @@ export default function Today() {
                     <button
                       className="action-button action-button--ghost"
                       type="button"
-                      onClick={() => handleDeleteTagEvent(event.id)}
+                      onClick={() => {
+                        void deleteTagEventAction.run(event.id);
+                      }}
+                      disabled={deleteTagEventAction.pending}
                     >
                       Delete
                     </button>

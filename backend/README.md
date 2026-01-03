@@ -20,6 +20,8 @@ uvicorn app.main:app --reload
 - `DB_PATH`: SQLite file path (default `backend/data/app.db`).
 - `DB_URL`: full SQLAlchemy URL (overrides `DB_PATH`).
 - `LOG_LEVEL`: logging level (default `INFO`).
+- `REMINDERS_ENABLED`: enable reminder notifications (default `false`).
+- `REMINDERS_CADENCE_MINUTES`: reminder cadence in minutes (default `1440`).
 - `OLLAMA_MODEL`: model name for summaries (default `llama3.2:1b`).
 - `OLLAMA_BASE_URL`: Ollama server URL (default `http://localhost:11434`).
 

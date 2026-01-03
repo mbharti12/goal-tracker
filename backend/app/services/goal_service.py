@@ -5,7 +5,14 @@ from typing import List, Optional
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
-from ..models import Condition, Goal, GoalCondition, GoalTag, Tag
+from ..models import (
+    Condition,
+    Goal,
+    GoalCondition,
+    GoalTag,
+    ScoringMode,
+    Tag,
+)
 from ..schemas import GoalCreate, GoalUpdate
 
 
@@ -39,9 +46,15 @@ def _validate_conditions(session: Session, conditions) -> None:
             raise ValueError(f"Condition {condition_item.condition_id} does not exist")
 
 
+def _validate_target_count(scoring_mode: ScoringMode, target_count: int) -> None:
+    if scoring_mode == ScoringMode.rating and not (1 <= target_count <= 100):
+        raise ValueError("rating goals require target_count between 1 and 100")
+
+
 def create_goal(session: Session, goal_in: GoalCreate) -> Goal:
     _validate_tags(session, goal_in.tags)
     _validate_conditions(session, goal_in.conditions)
+    _validate_target_count(goal_in.scoring_mode, goal_in.target_count)
 
     goal = Goal(
         name=goal_in.name,
@@ -81,14 +94,28 @@ def update_goal(session: Session, goal_id: int, goal_in: GoalUpdate) -> Optional
     if goal is None:
         return None
 
+    scoring_mode = (
+        goal_in.scoring_mode if goal_in.scoring_mode is not None else goal.scoring_mode
+    )
+    target_count = (
+        goal_in.target_count
+        if goal_in.target_count is not None
+        else goal.target_count
+    )
+    _validate_target_count(scoring_mode, target_count)
+    target_window = (
+        goal_in.target_window
+        if goal_in.target_window is not None
+        else goal.target_window
+    )
+
     if goal_in.name is not None:
         goal.name = goal_in.name
     if goal_in.description is not None:
         goal.description = goal_in.description
     if goal_in.active is not None:
         goal.active = goal_in.active
-    if goal_in.target_window is not None:
-        goal.target_window = goal_in.target_window
+    goal.target_window = target_window
     if goal_in.target_count is not None:
         goal.target_count = goal_in.target_count
     if goal_in.scoring_mode is not None:

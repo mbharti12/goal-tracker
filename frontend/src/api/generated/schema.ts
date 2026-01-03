@@ -13,6 +13,10 @@ export interface paths {
     /** Llm Health Check */
     get: operations["llm_health_check_llm_health_get"];
   };
+  "/admin/run-reminders": {
+    /** Run Reminders */
+    post: operations["run_reminders_admin_run_reminders_post"];
+  };
   "/goals": {
     /** List Goals */
     get: operations["list_goals_goals_get"];
@@ -69,6 +73,10 @@ export interface paths {
     /** Upsert Day Conditions */
     put: operations["upsert_day_conditions_days__date__conditions_put"];
   };
+  "/days/{date}/ratings": {
+    /** Upsert Day Ratings */
+    put: operations["upsert_day_ratings_days__date__ratings_put"];
+  };
   "/days/{date}/tag-events": {
     /** Create Tag Event */
     post: operations["create_tag_event_days__date__tag_events_post"];
@@ -76,6 +84,14 @@ export interface paths {
   "/tag-events/{event_id}": {
     /** Delete Tag Event */
     delete: operations["delete_tag_event_tag_events__event_id__delete"];
+  };
+  "/notifications": {
+    /** List Notifications */
+    get: operations["list_notifications_notifications_get"];
+  };
+  "/notifications/{notification_id}/read": {
+    /** Mark Notification Read */
+    post: operations["mark_notification_read_notifications__notification_id__read_post"];
   };
   "/review/query": {
     /** Review Query */
@@ -209,6 +225,29 @@ export interface components {
        */
       updated_at: string;
     };
+    /** DayGoalRatingInput */
+    DayGoalRatingInput: {
+      /** Goal Id */
+      goal_id: number;
+      /** Rating */
+      rating: number;
+      /** Note */
+      note?: string | null;
+    };
+    /** DayGoalRatingRead */
+    DayGoalRatingRead: {
+      /** Goal Id */
+      goal_id: number;
+      /** Rating */
+      rating: number;
+      /** Note */
+      note?: string | null;
+    };
+    /** DayGoalRatingsUpdate */
+    DayGoalRatingsUpdate: {
+      /** Ratings */
+      ratings?: components["schemas"]["DayGoalRatingInput"][];
+    };
     /** DayNoteUpdate */
     DayNoteUpdate: {
       /** Note */
@@ -221,10 +260,10 @@ export interface components {
       conditions?: components["schemas"]["DayConditionRead"][];
       /** Tag Events */
       tag_events?: components["schemas"]["TagEventRead"][];
+      /** Goal Ratings */
+      goal_ratings?: components["schemas"]["DayGoalRatingRead"][];
       /** Goals */
-      goals?: {
-          [key: string]: unknown;
-        }[];
+      goals?: components["schemas"]["GoalStatusRead"][];
     };
     /** GoalConditionInput */
     GoalConditionInput: {
@@ -284,6 +323,30 @@ export interface components {
       /** Conditions */
       conditions?: components["schemas"]["GoalConditionRead"][];
     };
+    /** GoalStatusRead */
+    GoalStatusRead: {
+      /** Goal Id */
+      goal_id: number;
+      /** Goal Name */
+      goal_name: string;
+      /** Applicable */
+      applicable: boolean;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "met" | "partial" | "missed" | "na";
+      /** Progress */
+      progress: number;
+      /** Target */
+      target: number;
+      /** Samples */
+      samples: number;
+      /** Window Days */
+      window_days: number;
+      target_window: components["schemas"]["TargetWindow"];
+      scoring_mode: components["schemas"]["ScoringMode"];
+    };
     /** GoalTagInput */
     GoalTagInput: {
       /** Tag Id */
@@ -332,6 +395,36 @@ export interface components {
       base_url: string;
       /** Error */
       error?: string | null;
+    };
+    /** NotificationMarkRead */
+    NotificationMarkRead: {
+      /** Id */
+      id: number;
+      /**
+       * Read At
+       * Format: date-time
+       */
+      read_at: string;
+    };
+    /** NotificationRead */
+    NotificationRead: {
+      /** Id */
+      id: number;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Type */
+      type: string;
+      /** Title */
+      title: string;
+      /** Body */
+      body: string;
+      /** Read At */
+      read_at?: string | null;
+      /** Dedupe Key */
+      dedupe_key?: string | null;
     };
     /** QueryPlan */
     QueryPlan: {
@@ -382,9 +475,7 @@ export interface components {
       note?: string | null;
       summary: components["schemas"]["ReviewDaySummary"];
       /** Goals */
-      goals?: {
-          [key: string]: unknown;
-        }[];
+      goals?: components["schemas"]["GoalStatusRead"][];
     };
     /** ReviewDaySummary */
     ReviewDaySummary: {
@@ -459,7 +550,7 @@ export interface components {
      * ScoringMode
      * @enum {string}
      */
-    ScoringMode: "count" | "binary";
+    ScoringMode: "count" | "binary" | "rating";
     /** TagCreate */
     TagCreate: {
       /** Name */
@@ -560,6 +651,19 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["LlmHealthResponse"];
+        };
+      };
+    };
+  };
+  /** Run Reminders */
+  run_reminders_admin_run_reminders_post: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
     };
@@ -911,6 +1015,33 @@ export interface operations {
       };
     };
   };
+  /** Upsert Day Ratings */
+  upsert_day_ratings_days__date__ratings_put: {
+    parameters: {
+      path: {
+        date: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DayGoalRatingsUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DayGoalRatingRead"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Create Tag Event */
   create_tag_event_days__date__tag_events_post: {
     parameters: {
@@ -950,6 +1081,50 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["TagEventDeleteResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** List Notifications */
+  list_notifications_notifications_get: {
+    parameters: {
+      query?: {
+        unread_only?: boolean;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["NotificationRead"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Mark Notification Read */
+  mark_notification_read_notifications__notification_id__read_post: {
+    parameters: {
+      path: {
+        notification_id: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["NotificationMarkRead"];
         };
       };
       /** @description Validation Error */

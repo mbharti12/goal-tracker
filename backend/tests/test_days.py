@@ -77,12 +77,14 @@ async def test_daily_logging_flow(tmp_path):
             "day_entry",
             "conditions",
             "tag_events",
+            "goal_ratings",
             "goals",
         }
         assert day_data["day_entry"]["date"] == date
         assert day_data["day_entry"]["note"] == "Updated note"
         assert day_data["conditions"] == conditions_data
         assert len(day_data["tag_events"]) == 2
+        assert day_data["goal_ratings"] == []
         assert day_data["goals"] == []
 
         delete_resp = await client.delete(f"/tag-events/{tag_by_name['id']}")

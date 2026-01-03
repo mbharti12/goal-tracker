@@ -16,6 +16,18 @@ Release date: YYYY-MM-DD
 - [x] Weekly/monthly progress now computes to the selected date instead of full window totals
 ### Removed
 
+## v2.0 (YYYY-MM-DD)
+
+Release date: YYYY-MM-DD
+
+### Added
+- [x] Rating-based scoring mode for goals.
+- [x] Per-day goal ratings for tracking and review.
+- [x] In-app notifications with reminder scheduling.
+
+### Changed
+- [x] Click feedback and toast notifications for key UX actions.
+
 ## v1.5 (YYYY-MM-DD)
 
 Release date: YYYY-MM-DD

@@ -36,9 +36,14 @@ export type DayNoteUpdate = Schemas["DayNoteUpdate"];
 export type DayConditionInput = Schemas["DayConditionInput"];
 export type DayConditionsUpdate = Schemas["DayConditionsUpdate"];
 export type DayConditionRead = Schemas["DayConditionRead"];
+export type DayGoalRatingInput = Schemas["DayGoalRatingInput"];
+export type DayGoalRatingRead = Schemas["DayGoalRatingRead"];
+export type DayGoalRatingsUpdate = Schemas["DayGoalRatingsUpdate"];
 export type TagEventCreate = Schemas["TagEventCreate"];
 export type TagEventRead = Schemas["TagEventRead"];
 export type TagEventDeleteResponse = Schemas["TagEventDeleteResponse"];
+export type NotificationRead = Schemas["NotificationRead"];
+export type NotificationMarkRead = Schemas["NotificationMarkRead"];
 export type CalendarConditionRead = Schemas["CalendarConditionRead"];
 export type CalendarTagRead = Schemas["CalendarTagRead"];
 export type CalendarDayRead = Schemas["CalendarDayRead"];
@@ -62,7 +67,10 @@ export type GoalStatus = {
   status: "met" | "partial" | "missed" | "na";
   progress: number;
   target: number;
+  samples: number;
+  window_days: number;
   target_window: TargetWindow;
+  scoring_mode: ScoringMode;
 };
 
 export type DayRead = Omit<Schemas["DayRead"], "goals"> & {

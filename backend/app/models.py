@@ -2,6 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
+from sqlalchemy import CheckConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -14,6 +15,7 @@ class TargetWindow(str, Enum):
 class ScoringMode(str, Enum):
     count = "count"
     binary = "binary"
+    rating = "rating"
 
 
 class Goal(SQLModel, table=True):
@@ -37,6 +39,21 @@ class Goal(SQLModel, table=True):
     @property
     def conditions(self) -> List["GoalCondition"]:
         return self.goal_conditions
+
+
+class GoalRating(SQLModel, table=True):
+    __tablename__ = "goal_ratings"
+    __table_args__ = (
+        CheckConstraint(
+            "rating >= 1 AND rating <= 100",
+            name="ck_goal_ratings_rating_range",
+        ),
+    )
+
+    date: str = Field(primary_key=True)
+    goal_id: int = Field(foreign_key="goals.id", primary_key=True)
+    rating: int = Field(ge=1, le=100)
+    note: Optional[str] = None
 
 
 class Tag(SQLModel, table=True):
@@ -114,3 +131,23 @@ class TagEvent(SQLModel, table=True):
     note: Optional[str] = None
 
     tag: Optional[Tag] = Relationship(back_populates="tag_events")
+
+
+class Notification(SQLModel, table=True):
+    __tablename__ = "notifications"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    type: str
+    title: str
+    body: str
+    read_at: Optional[datetime] = Field(default=None, index=True)
+    dedupe_key: Optional[str] = Field(default=None, index=True)
+
+
+class AppState(SQLModel, table=True):
+    __tablename__ = "app_state"
+
+    key: str = Field(primary_key=True)
+    value: str
+    updated_at: datetime = Field(default_factory=datetime.utcnow)

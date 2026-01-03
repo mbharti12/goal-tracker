@@ -1,4 +1,5 @@
 import { apiRequest } from "./client";
+import { request } from "./generated/client";
 import type {
   CalendarDayRead,
   CalendarSummaryRead,
@@ -7,6 +8,8 @@ import type {
   DayConditionRead,
   DayConditionsUpdate,
   DayEntryRead,
+  DayGoalRatingRead,
+  DayGoalRatingsUpdate,
   DayNoteUpdate,
   DayRead,
   GoalCreate,
@@ -86,6 +89,12 @@ export const upsertDayConditions = (date: string, payload: DayConditionsUpdate) 
     body: payload,
   });
 
+export const upsertDayRatings = (date: string, payload: DayGoalRatingsUpdate) =>
+  apiRequest<DayGoalRatingRead[]>(`/days/${date}/ratings`, {
+    method: "PUT",
+    body: payload,
+  });
+
 export const createTagEvent = (date: string, payload: TagEventCreate) =>
   apiRequest<TagEventRead>(`/days/${date}/tag-events`, {
     method: "POST",
@@ -108,3 +117,11 @@ export const reviewFilter = (payload: ReviewFilterRequest) =>
     method: "POST",
     body: payload,
   });
+
+export const listNotifications = () => request("/notifications", "get");
+
+export const markNotificationRead = (notificationId: number) =>
+  request(
+    `/notifications/${notificationId}/read` as "/notifications/{notification_id}/read",
+    "post",
+  );
