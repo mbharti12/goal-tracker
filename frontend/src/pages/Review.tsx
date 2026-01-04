@@ -1,7 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, getErrorMessage } from "../api/client";
-import { getCalendar, getDay, getLlmHealth, reviewFilter, reviewQuery } from "../api/endpoints";
-import type { LlmHealthResponse, ReviewDebug } from "../api/types";
+import {
+  compareTrends,
+  getCalendar,
+  getDay,
+  getLlmHealth,
+  reviewFilter,
+  reviewQuery,
+} from "../api/endpoints";
+import type {
+  LlmHealthResponse,
+  ReviewDebug,
+  TrendBucket,
+  TrendCompareResponse,
+} from "../api/types";
+import MultiTrendChart from "../components/MultiTrendChart";
 import { useRefresh } from "../context/RefreshContext";
 import { useConditions } from "../hooks/useConditions";
 import { useGoals } from "../hooks/useGoals";
@@ -20,6 +33,11 @@ const DOW_OPTIONS = [
 const DOW_BY_INDEX = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const DEFAULT_OLLAMA_MODEL = "llama3.2:1b";
 const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
+const TREND_BUCKETS: Array<{ value: TrendBucket; label: string }> = [
+  { value: "day", label: "Day" },
+  { value: "week", label: "Week" },
+  { value: "month", label: "Month" },
+];
 
 type LlmHealthState = {
   loading: boolean;
@@ -64,6 +82,11 @@ export default function Review() {
   );
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [trendBucket, setTrendBucket] = useState<TrendBucket>("week");
+  const [trendData, setTrendData] = useState<TrendCompareResponse | null>(null);
+  const [trendLoading, setTrendLoading] = useState(false);
+  const [trendError, setTrendError] = useState<string | null>(null);
+  const [trendReloadToken, setTrendReloadToken] = useState(0);
 
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiAnswer, setAiAnswer] = useState<string | null>(null);
@@ -293,6 +316,38 @@ export default function Review() {
     handlePreview();
   }, [handlePreview, previewDates.length, previewLoading, previewMeta, refreshToken]);
 
+  useEffect(() => {
+    if (!rangeValid || goalIds.length < 2) {
+      setTrendData(null);
+      setTrendError(null);
+      setTrendLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      setTrendLoading(true);
+      setTrendError(null);
+      try {
+        const data = await compareTrends(goalIds, startDate, endDate, trendBucket);
+        if (!cancelled) {
+          setTrendData(data);
+          setTrendLoading(false);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setTrendError(getErrorMessage(error));
+          setTrendLoading(false);
+        }
+      }
+    };
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [endDate, goalIds, rangeValid, startDate, trendBucket, trendReloadToken]);
+
   const runQuery = useCallback(async (prompt: string, label: string) => {
     const trimmed = prompt.trim();
     if (!trimmed) {
@@ -332,6 +387,10 @@ export default function Review() {
   const handlePromptOnly = useCallback(() => {
     runQuery(aiPrompt, "Prompt-only");
   }, [aiPrompt, runQuery]);
+
+  const handleTrendRetry = useCallback(() => {
+    setTrendReloadToken((prev) => prev + 1);
+  }, []);
 
   const canSubmit = rangeValid && !previewLoading;
   const previewLabel =
@@ -380,6 +439,16 @@ export default function Review() {
   const debugPlanText = useMemo(
     () => (aiDebug ? JSON.stringify(aiDebug.plan, null, 2) : ""),
     [aiDebug],
+  );
+
+  const formatCorrelation = useCallback(
+    (value: number | null) => (value === null ? "—" : value.toFixed(2)),
+    [],
+  );
+
+  const lookupGoalName = useCallback(
+    (goalId: number) => goalNameMap.get(goalId) ?? `Goal ${goalId}`,
+    [goalNameMap],
   );
 
   return (
@@ -637,6 +706,79 @@ export default function Review() {
             </button>
           </div>
         </div>
+      </div>
+
+      <div className="card review-trends">
+        <div className="review-trends__header">
+          <div>
+            <h2>Trends</h2>
+            <p>Compare momentum across the selected goals.</p>
+          </div>
+          <div className="review-trends__bucket">
+            <div className="field-label">Bucket</div>
+            <div className="chip-row">
+              {TREND_BUCKETS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`toggle-chip${
+                    trendBucket === option.value ? " toggle-chip--active" : ""
+                  }`}
+                  onClick={() => setTrendBucket(option.value)}
+                  aria-pressed={trendBucket === option.value}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {goalIds.length < 2 ? (
+          <div className="empty-state">Select at least two goals to compare trends.</div>
+        ) : !rangeValid ? (
+          <div className="status status--error" role="alert">
+            Fix the date range to load trend comparisons.
+          </div>
+        ) : (
+          <>
+            {trendError && (
+              <div className="status status--error" role="alert">
+                <div>Couldn’t load trends. {trendError}</div>
+                <button className="action-button" type="button" onClick={handleTrendRetry}>
+                  Retry
+                </button>
+              </div>
+            )}
+
+            <MultiTrendChart series={trendData?.series ?? []} loading={trendLoading} />
+
+            <div className="trend-comparisons">
+              <div className="trend-comparisons__title">Correlations</div>
+              {trendData?.comparisons?.length ? (
+                <div className="trend-comparisons__list">
+                  {trendData.comparisons.map((item) => (
+                    <div
+                      key={`${item.goal_id_a}-${item.goal_id_b}`}
+                      className="trend-comparisons__row"
+                    >
+                      <span>
+                        {lookupGoalName(item.goal_id_a)} vs{" "}
+                        {lookupGoalName(item.goal_id_b)}
+                      </span>
+                      <span>r={formatCorrelation(item.correlation)}</span>
+                      <span>n={item.n}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="trend-comparisons__empty">
+                  No comparable samples yet.
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       <div className="card review-output">

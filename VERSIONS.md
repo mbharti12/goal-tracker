@@ -16,6 +16,18 @@ Release date: YYYY-MM-DD
 - [x] Weekly/monthly progress now computes to the selected date instead of full window totals
 ### Removed
 
+## v3.0 (YYYY-MM-DD)
+
+Release date: YYYY-MM-DD
+
+### Added
+- [x] Goal definition version history with version-specific tags/conditions.
+- [x] Trend endpoints for per-goal series and multi-goal comparisons.
+- [x] Trend-based notifications for pace and 7-day average drops.
+
+### Changed
+- [x] Scoring now uses effective goal versions for historical dates.
+
 ## v2.0 (YYYY-MM-DD)
 
 Release date: YYYY-MM-DD

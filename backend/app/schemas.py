@@ -91,6 +91,17 @@ class GoalUpdate(BaseModel):
     scoring_mode: Optional[ScoringMode] = None
     tags: Optional[List[GoalTagInput]] = None
     conditions: Optional[List[GoalConditionInput]] = None
+    effective_date: Optional[str] = None
+
+    @field_validator("effective_date")
+    def _validate_effective_date(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+        except ValueError as exc:
+            raise ValueError("Invalid date format. Expected YYYY-MM-DD.") from exc
+        return value
 
 
 class GoalRead(GoalBase):
@@ -121,6 +132,7 @@ class DayConditionInput(BaseModel):
 
 class GoalStatusRead(BaseModel):
     goal_id: int
+    goal_version_id: int
     goal_name: str
     applicable: bool
     status: Literal["met", "partial", "missed", "na"]
@@ -130,6 +142,70 @@ class GoalStatusRead(BaseModel):
     window_days: int
     target_window: TargetWindow
     scoring_mode: ScoringMode
+
+
+TrendBucket = Literal["day", "week", "month"]
+
+
+class TrendPoint(BaseModel):
+    date: str
+    period_start: str
+    period_end: str
+    goal_version_id: int
+    applicable: bool
+    status: Literal["met", "partial", "missed", "na"]
+    progress: float
+    target: int
+    ratio: float
+    samples: int
+    window_days: int
+    target_window: TargetWindow
+    scoring_mode: ScoringMode
+
+
+class GoalTrendResponse(BaseModel):
+    goal_id: int
+    goal_name: str
+    bucket: TrendBucket
+    start: str
+    end: str
+    points: List[TrendPoint] = Field(default_factory=list)
+
+
+class TrendCompareRequest(BaseModel):
+    goal_ids: List[int]
+    start: str
+    end: str
+    bucket: TrendBucket = "day"
+
+    @field_validator("start", "end")
+    def _validate_trend_date(cls, value: str) -> str:
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+        except ValueError as exc:
+            raise ValueError("Invalid date format. Expected YYYY-MM-DD.") from exc
+        return value
+
+
+class TrendSeries(BaseModel):
+    goal_id: int
+    goal_name: str
+    points: List[TrendPoint] = Field(default_factory=list)
+
+
+class TrendComparison(BaseModel):
+    goal_id_a: int
+    goal_id_b: int
+    correlation: Optional[float] = None
+    n: int
+
+
+class TrendCompareResponse(BaseModel):
+    bucket: TrendBucket
+    start: str
+    end: str
+    series: List[TrendSeries] = Field(default_factory=list)
+    comparisons: List[TrendComparison] = Field(default_factory=list)
 
 
 class DayConditionsUpdate(BaseModel):

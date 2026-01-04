@@ -8,6 +8,9 @@ from app.models import (
     Goal,
     GoalCondition,
     GoalTag,
+    GoalVersion,
+    GoalVersionCondition,
+    GoalVersionTag,
     Notification,
     ScoringMode,
     Tag,
@@ -84,6 +87,60 @@ def test_reminder_creates_notification_for_incomplete_goals(tmp_path):
         )
         session.commit()
 
+        base_start = "0001-01-01"
+        read_version = GoalVersion(
+            goal_id=read_goal.id,
+            start_date=base_start,
+            end_date=None,
+            target_window=read_goal.target_window,
+            target_count=read_goal.target_count,
+            scoring_mode=read_goal.scoring_mode,
+        )
+        workout_version = GoalVersion(
+            goal_id=workout_goal.id,
+            start_date=base_start,
+            end_date=None,
+            target_window=workout_goal.target_window,
+            target_count=workout_goal.target_count,
+            scoring_mode=workout_goal.scoring_mode,
+        )
+        nap_version = GoalVersion(
+            goal_id=nap_goal.id,
+            start_date=base_start,
+            end_date=None,
+            target_window=nap_goal.target_window,
+            target_count=nap_goal.target_count,
+            scoring_mode=nap_goal.scoring_mode,
+        )
+        session.add_all([read_version, workout_version, nap_version])
+        session.flush()
+
+        session.add_all(
+            [
+                GoalVersionTag(
+                    goal_version_id=read_version.id,
+                    tag_id=read_tag.id,
+                    weight=1,
+                ),
+                GoalVersionTag(
+                    goal_version_id=workout_version.id,
+                    tag_id=workout_tag.id,
+                    weight=1,
+                ),
+                GoalVersionTag(
+                    goal_version_id=nap_version.id,
+                    tag_id=nap_tag.id,
+                    weight=1,
+                ),
+                GoalVersionCondition(
+                    goal_version_id=nap_version.id,
+                    condition_id=quiet_condition.id,
+                    required_value=True,
+                ),
+            ]
+        )
+        session.commit()
+
         date_str = "2024-02-10"
         session.add_all(
             [
@@ -98,7 +155,9 @@ def test_reminder_creates_notification_for_incomplete_goals(tmp_path):
         assert result["ran"] is True
         assert result["created"] is True
 
-        notifications = session.exec(select(Notification)).all()
+        notifications = session.exec(
+            select(Notification).where(Notification.type == "reminder")
+        ).all()
         assert len(notifications) == 1
         note = notifications[0]
         assert note.dedupe_key == f"reminder:{date_str}"
@@ -109,5 +168,7 @@ def test_reminder_creates_notification_for_incomplete_goals(tmp_path):
         second = reminder_service.run_reminders(session, now=now, force=True)
         assert second["created"] is False
 
-        notifications_after = session.exec(select(Notification)).all()
+        notifications_after = session.exec(
+            select(Notification).where(Notification.type == "reminder")
+        ).all()
         assert len(notifications_after) == 1

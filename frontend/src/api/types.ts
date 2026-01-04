@@ -62,6 +62,7 @@ export type ReviewQueryResponse = Schemas["ReviewQueryResponse"];
 
 export type GoalStatus = {
   goal_id: number;
+  goal_version_id: number;
   goal_name: string;
   applicable: boolean;
   status: "met" | "partial" | "missed" | "na";
@@ -87,4 +88,59 @@ export type ReviewContext = Omit<Schemas["ReviewContext"], "days"> & {
 
 export type ReviewFilterResponse = Omit<Schemas["ReviewFilterResponse"], "context"> & {
   context: ReviewContext;
+};
+
+export type TrendBucket = "day" | "week" | "month";
+
+export type TrendPoint = {
+  date: string;
+  period_start: string;
+  period_end: string;
+  goal_version_id: number;
+  applicable: boolean;
+  status: "met" | "partial" | "missed" | "na";
+  progress: number;
+  target: number;
+  ratio: number;
+  samples: number;
+  window_days: number;
+  target_window: TargetWindow;
+  scoring_mode: ScoringMode;
+};
+
+export type GoalTrendResponse = {
+  goal_id: number;
+  goal_name: string;
+  bucket: TrendBucket;
+  start: string;
+  end: string;
+  points: TrendPoint[];
+};
+
+export type TrendCompareRequest = {
+  goal_ids: number[];
+  start: string;
+  end: string;
+  bucket: TrendBucket;
+};
+
+export type TrendSeries = {
+  goal_id: number;
+  goal_name: string;
+  points: TrendPoint[];
+};
+
+export type TrendComparison = {
+  goal_id_a: number;
+  goal_id_b: number;
+  correlation: number | null;
+  n: number;
+};
+
+export type TrendCompareResponse = {
+  bucket: TrendBucket;
+  start: string;
+  end: string;
+  series: TrendSeries[];
+  comparisons: TrendComparison[];
 };

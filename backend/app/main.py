@@ -8,7 +8,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .db import init_db, set_engine
-from .routers import admin, conditions, days, goals, health, notifications, review, tags
+from .routers import (
+    admin,
+    conditions,
+    days,
+    goals,
+    health,
+    notifications,
+    review,
+    tags,
+    trends,
+)
 from .services.reminder_service import reminder_loop
 from .settings import settings
 
@@ -57,6 +67,7 @@ def create_app(engine_override=None) -> FastAPI:
     app.include_router(days)
     app.include_router(notifications)
     app.include_router(review)
+    app.include_router(trends)
 
     return app
 

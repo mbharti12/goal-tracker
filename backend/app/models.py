@@ -98,6 +98,52 @@ class GoalCondition(SQLModel, table=True):
     condition: Optional[Condition] = Relationship(back_populates="goal_conditions")
 
 
+class GoalVersion(SQLModel, table=True):
+    __tablename__ = "goal_versions"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    goal_id: int = Field(foreign_key="goals.id", index=True)
+    start_date: str
+    end_date: Optional[str] = None
+    target_window: TargetWindow
+    target_count: int
+    scoring_mode: ScoringMode
+
+    goal: Optional[Goal] = Relationship()
+    version_tags: List["GoalVersionTag"] = Relationship(back_populates="goal_version")
+    version_conditions: List["GoalVersionCondition"] = Relationship(
+        back_populates="goal_version"
+    )
+
+
+class GoalVersionTag(SQLModel, table=True):
+    __tablename__ = "goal_version_tags"
+
+    goal_version_id: int = Field(
+        foreign_key="goal_versions.id", primary_key=True, index=True
+    )
+    tag_id: int = Field(foreign_key="tags.id", primary_key=True)
+    weight: int = Field(default=1)
+
+    goal_version: Optional[GoalVersion] = Relationship(back_populates="version_tags")
+    tag: Optional[Tag] = Relationship()
+
+
+class GoalVersionCondition(SQLModel, table=True):
+    __tablename__ = "goal_version_conditions"
+
+    goal_version_id: int = Field(
+        foreign_key="goal_versions.id", primary_key=True, index=True
+    )
+    condition_id: int = Field(foreign_key="conditions.id", primary_key=True)
+    required_value: bool = Field(default=True)
+
+    goal_version: Optional[GoalVersion] = Relationship(
+        back_populates="version_conditions"
+    )
+    condition: Optional[Condition] = Relationship()
+
+
 class DayEntry(SQLModel, table=True):
     __tablename__ = "day_entries"
 

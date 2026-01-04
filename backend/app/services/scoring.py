@@ -3,7 +3,7 @@ from __future__ import annotations
 from calendar import monthrange
 from collections import defaultdict
 from datetime import date, datetime, timedelta
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from sqlmodel import Session, select
 
@@ -13,6 +13,9 @@ from ..models import (
     GoalCondition,
     GoalRating,
     GoalTag,
+    GoalVersion,
+    GoalVersionCondition,
+    GoalVersionTag,
     ScoringMode,
     TagEvent,
     TargetWindow,
@@ -63,6 +66,69 @@ def _load_goal_conditions(
     for row in rows:
         conditions_by_goal[row.goal_id].append((row.condition_id, row.required_value))
     return conditions_by_goal
+
+
+def _load_goal_versions(
+    session: Session, goal_ids: Iterable[int]
+) -> Dict[int, List[GoalVersion]]:
+    versions_by_goal: Dict[int, List[GoalVersion]] = defaultdict(list)
+    if not goal_ids:
+        return versions_by_goal
+
+    rows = session.exec(
+        select(GoalVersion).where(GoalVersion.goal_id.in_(goal_ids))
+    ).all()
+    for row in rows:
+        versions_by_goal[row.goal_id].append(row)
+    return versions_by_goal
+
+
+def _select_effective_version(
+    versions: Iterable[GoalVersion], date_str: str
+) -> Optional[GoalVersion]:
+    effective: Optional[GoalVersion] = None
+    for version in versions:
+        if version.start_date > date_str:
+            continue
+        if version.end_date is not None and version.end_date < date_str:
+            continue
+        if effective is None or version.start_date > effective.start_date:
+            effective = version
+    return effective
+
+
+def _load_version_tags(
+    session: Session, version_ids: Iterable[int]
+) -> Dict[int, Dict[int, int]]:
+    tags_by_version: Dict[int, Dict[int, int]] = defaultdict(dict)
+    if not version_ids:
+        return tags_by_version
+
+    rows = session.exec(
+        select(GoalVersionTag).where(GoalVersionTag.goal_version_id.in_(version_ids))
+    ).all()
+    for row in rows:
+        tags_by_version[row.goal_version_id][row.tag_id] = row.weight
+    return tags_by_version
+
+
+def _load_version_conditions(
+    session: Session, version_ids: Iterable[int]
+) -> Dict[int, List[Tuple[int, bool]]]:
+    conditions_by_version: Dict[int, List[Tuple[int, bool]]] = defaultdict(list)
+    if not version_ids:
+        return conditions_by_version
+
+    rows = session.exec(
+        select(GoalVersionCondition).where(
+            GoalVersionCondition.goal_version_id.in_(version_ids)
+        )
+    ).all()
+    for row in rows:
+        conditions_by_version[row.goal_version_id].append(
+            (row.condition_id, row.required_value)
+        )
+    return conditions_by_version
 
 
 def _load_day_conditions(session: Session, date_str: str) -> Dict[int, bool]:
@@ -130,6 +196,15 @@ def compute_goal_statuses_for_date(session: Session, date_str: str) -> List[dict
     goal_ids = [goal.id for goal in goals if goal.id is not None]
     goal_tags = _load_goal_tags(session, goal_ids)
     goal_conditions = _load_goal_conditions(session, goal_ids)
+    versions_by_goal = _load_goal_versions(session, goal_ids)
+    version_ids = [
+        version.id
+        for versions in versions_by_goal.values()
+        for version in versions
+        if version.id is not None
+    ]
+    version_tags = _load_version_tags(session, version_ids)
+    version_conditions = _load_version_conditions(session, version_ids)
     day_conditions = _load_day_conditions(session, date_str)
 
     day = datetime.strptime(date_str, "%Y-%m-%d").date()
@@ -141,7 +216,27 @@ def compute_goal_statuses_for_date(session: Session, date_str: str) -> List[dict
     range_start_str = range_start.isoformat()
     range_end_str = date_str
 
-    tag_ids = {tag_id for tags in goal_tags.values() for tag_id in tags.keys()}
+    version_selection: Dict[int, Tuple[Optional[GoalVersion], bool]] = {}
+    for goal in goals:
+        versions = versions_by_goal.get(goal.id, [])
+        effective = _select_effective_version(versions, date_str)
+        if effective is not None:
+            version_selection[goal.id] = (effective, True)
+        elif versions:
+            earliest = min(versions, key=lambda version: version.start_date)
+            latest = max(versions, key=lambda version: version.start_date)
+            fallback = earliest if date_str < earliest.start_date else latest
+            version_selection[goal.id] = (fallback, True)
+        else:
+            version_selection[goal.id] = (None, True)
+
+    tag_ids = set()
+    for goal in goals:
+        version, _ = version_selection.get(goal.id, (None, True))
+        if version is not None and version.id is not None:
+            tag_ids.update(version_tags.get(version.id, {}).keys())
+        else:
+            tag_ids.update(goal_tags.get(goal.id, {}).keys())
     events_by_tag_and_date = _load_tag_events(
         session, tag_ids, range_start_str, range_end_str
     )
@@ -152,22 +247,24 @@ def compute_goal_statuses_for_date(session: Session, date_str: str) -> List[dict
         events_by_tag_and_date, month_start_str, date_str
     )
 
-    rating_goal_ids = [
-        goal.id
-        for goal in goals
-        if goal.id is not None and goal.scoring_mode == ScoringMode.rating
-    ]
+    rating_goal_ids = []
+    rating_window_starts = []
+    for goal in goals:
+        version, _ = version_selection.get(goal.id, (None, True))
+        scoring_mode = version.scoring_mode if version is not None else goal.scoring_mode
+        target_window = (
+            version.target_window if version is not None else goal.target_window
+        )
+        if scoring_mode != ScoringMode.rating:
+            continue
+        rating_goal_ids.append(goal.id)
+        if target_window == TargetWindow.week:
+            rating_window_starts.append(week_start)
+        elif target_window == TargetWindow.month:
+            rating_window_starts.append(month_start)
+        else:
+            rating_window_starts.append(day)
     if rating_goal_ids:
-        rating_window_starts = []
-        for goal in goals:
-            if goal.scoring_mode != ScoringMode.rating:
-                continue
-            if goal.target_window == TargetWindow.week:
-                rating_window_starts.append(week_start)
-            elif goal.target_window == TargetWindow.month:
-                rating_window_starts.append(month_start)
-            else:
-                rating_window_starts.append(day)
         rating_range_start = min(rating_window_starts) if rating_window_starts else day
         ratings_by_goal = _load_goal_ratings(
             session,
@@ -180,7 +277,22 @@ def compute_goal_statuses_for_date(session: Session, date_str: str) -> List[dict
 
     statuses: List[dict] = []
     for goal in goals:
-        conditions = goal_conditions.get(goal.id, [])
+        version, _ = version_selection.get(goal.id, (None, True))
+        if version is not None:
+            conditions = version_conditions.get(version.id, [])
+            tag_weights = version_tags.get(version.id, {})
+            target_window = version.target_window
+            target_count = version.target_count
+            scoring_mode = version.scoring_mode
+            goal_version_id = version.id or 0
+        else:
+            conditions = goal_conditions.get(goal.id, [])
+            tag_weights = goal_tags.get(goal.id, {})
+            target_window = goal.target_window
+            target_count = goal.target_count
+            scoring_mode = goal.scoring_mode
+            goal_version_id = 0
+
         if not conditions:
             applicable = True
         else:
@@ -193,12 +305,12 @@ def compute_goal_statuses_for_date(session: Session, date_str: str) -> List[dict
         progress = 0.0
         samples = 0
         window_days = 0
-        target_window_value = goal.target_window.value
+        target_window_value = target_window.value
         if applicable:
-            if goal.scoring_mode == ScoringMode.rating:
-                if goal.target_window == TargetWindow.week:
+            if scoring_mode == ScoringMode.rating:
+                if target_window == TargetWindow.week:
                     window_start = week_start
-                elif goal.target_window == TargetWindow.month:
+                elif target_window == TargetWindow.month:
                     window_start = month_start
                 else:
                     window_start = day
@@ -211,13 +323,12 @@ def compute_goal_statuses_for_date(session: Session, date_str: str) -> List[dict
                         samples += 1
                 avg = sum_ratings / window_days if window_days else 0.0
                 progress = avg
-                status = "met" if avg >= goal.target_count else "missed"
+                status = "met" if avg >= target_count else "missed"
             else:
-                tag_weights = goal_tags.get(goal.id, {})
-                if goal.target_window == TargetWindow.week:
+                if target_window == TargetWindow.week:
                     for tag_id, weight in tag_weights.items():
                         progress += events_by_tag_week.get(tag_id, 0) * weight
-                elif goal.target_window == TargetWindow.month:
+                elif target_window == TargetWindow.month:
                     for tag_id, weight in tag_weights.items():
                         progress += events_by_tag_month.get(tag_id, 0) * weight
                 else:
@@ -226,7 +337,7 @@ def compute_goal_statuses_for_date(session: Session, date_str: str) -> List[dict
                             events_by_tag_and_date.get((tag_id, date_str), 0) * weight
                         )
 
-                if progress >= goal.target_count:
+                if progress >= target_count:
                     status = "met"
                 elif progress > 0:
                     status = "partial"
@@ -241,15 +352,16 @@ def compute_goal_statuses_for_date(session: Session, date_str: str) -> List[dict
         statuses.append(
             {
                 "goal_id": goal.id,
+                "goal_version_id": goal_version_id,
                 "goal_name": goal.name,
                 "applicable": applicable,
                 "status": status,
                 "progress": progress,
-                "target": goal.target_count,
+                "target": target_count,
                 "samples": samples,
                 "window_days": window_days,
                 "target_window": target_window_value,
-                "scoring_mode": goal.scoring_mode,
+                "scoring_mode": scoring_mode,
             }
         )
 

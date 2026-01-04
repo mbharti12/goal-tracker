@@ -11,13 +11,9 @@
 - Calendar: month nav buttons update `activeMonth`; day tiles navigate to `/today` and set the date. Data loads via `getCalendarSummary` with local `loading/error` state and a retry button (currently wired to `setReloadToken`, which is not defined in this file). `frontend/src/pages/Calendar.tsx`, `frontend/src/api/endpoints.ts`
 - Review: actions live in `handlePreview` (calls `/review/filter`, with a `getCalendar`+`getDay` fallback), `handleManualSummary`, and `handlePromptOnly`. Loading/error states are tracked separately for preview, AI query, and LLM health checks, with retry buttons for conditions/goals lists. `frontend/src/pages/Review.tsx`, `frontend/src/hooks/useGoals.ts`, `frontend/src/hooks/useConditions.ts`, `frontend/src/api/endpoints.ts`
 
-## 3) v2 API contract additions (planned)
-- Goal ratings
-  - New schemas: `GoalRatingRead { id, date, goal_id, rating (1-5), note?, created_at, updated_at }`, `GoalRatingUpsert { goal_id, rating, note? }`. `backend/app/schemas.py`, `backend/app/models.py`
-  - Endpoints: `GET /days/{date}/goal-ratings`, `PUT /days/{date}/goal-ratings` (upsert list), `GET /goals/{goal_id}/ratings?start&end`. Add `goal_ratings` to `DayRead`. `backend/app/routers/days.py`, `backend/app/schemas.py`
-- Notifications/reminders
-  - New schemas: `ReminderRead { id, title, goal_id?, cadence, days_of_week?, time, timezone, channel, active, next_fire_at }` and `NotificationRead { id, reminder_id?, title, body, status, created_at, delivered_at?, read_at? }`. `backend/app/schemas.py`, `backend/app/models.py`
-  - Endpoints: `GET/POST/PUT/DELETE /reminders`; `GET /notifications?since=&status=`; `PATCH /notifications/{id}` (mark read/ack). `backend/app/routers/reminders.py`, `backend/app/routers/notifications.py`
-- UX feedback primitives
-  - New schema: `FeedbackMessage { level, message, detail?, code?, target?, actions? }` where `target` is `toast|banner|inline` and `actions` is `{ label, href?, action? }`. `backend/app/schemas.py`
-  - New response shape for v2 mutating endpoints: `{ data, feedback?: FeedbackMessage[] }` to drive consistent UI messaging without changing HTTP error handling. `backend/app/routers/*`, `frontend/src/api/endpoints.ts`, `frontend/src/api/types.ts`
+## 3) v3 scoring + trends architecture
+- Goal definitions now version over time (`GoalVersion`, `GoalVersionTag`, `GoalVersionCondition`) with backfill during `init_db` to ensure every goal has a baseline version. `backend/app/models.py`, `backend/app/db.py`, `backend/app/services/goal_service.py`
+- Scoring resolves the effective goal version for each date and uses version-specific targets/tags/conditions while keeping the response shape intact (plus `goal_version_id`). `backend/app/services/scoring.py`, `backend/app/schemas.py`
+- Trend series generation is centralized in `trend_service.build_trend_series`, which bulk-loads tag events, ratings, day conditions, and version metadata to compute per-date points without per-day scoring loops. `backend/app/services/trend_service.py`
+- Trend APIs live under `/goals/{id}/trend` and `/trends/compare`, with Pearson correlation computed across aligned ratios. `backend/app/routers/trends.py`, `backend/app/schemas.py`
+- Reminder runs now include trend notifications (daily average drop + weekly/monthly pace) with per-day dedupe keys. `backend/app/services/reminder_service.py`

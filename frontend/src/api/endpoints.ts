@@ -12,6 +12,7 @@ import type {
   DayGoalRatingsUpdate,
   DayNoteUpdate,
   DayRead,
+  GoalTrendResponse,
   GoalCreate,
   GoalRead,
   GoalUpdate,
@@ -26,6 +27,9 @@ import type {
   TagEventDeleteResponse,
   TagEventRead,
   TagRead,
+  TrendBucket,
+  TrendCompareRequest,
+  TrendCompareResponse,
 } from "./types";
 
 export const getHealth = () => apiRequest<HealthResponse>("/health");
@@ -125,3 +129,24 @@ export const markNotificationRead = (notificationId: number) =>
     `/notifications/${notificationId}/read` as "/notifications/{notification_id}/read",
     "post",
   );
+
+export const getGoalTrend = (
+  goalId: number,
+  start: string,
+  end: string,
+  bucket: TrendBucket,
+) => {
+  const params = new URLSearchParams({ start, end, bucket });
+  return apiRequest<GoalTrendResponse>(`/goals/${goalId}/trend?${params.toString()}`);
+};
+
+export const compareTrends = (
+  goalIds: number[],
+  start: string,
+  end: string,
+  bucket: TrendBucket,
+) =>
+  apiRequest<TrendCompareResponse>("/trends/compare", {
+    method: "POST",
+    body: { goal_ids: goalIds, start, end, bucket } satisfies TrendCompareRequest,
+  });

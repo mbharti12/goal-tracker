@@ -6,13 +6,23 @@ import {
   createTag,
   deactivateTag,
   deleteGoal,
+  getGoalTrend,
   reactivateTag,
   updateGoal,
 } from "../api/endpoints";
-import type { GoalRead, ScoringMode, TagRead, TargetWindow } from "../api/types";
+import type {
+  GoalRead,
+  GoalTrendResponse,
+  ScoringMode,
+  TagRead,
+  TargetWindow,
+  TrendBucket,
+} from "../api/types";
+import TrendChart from "../components/TrendChart";
 import { useConditions } from "../hooks/useConditions";
 import { useGoals } from "../hooks/useGoals";
 import { useTags } from "../hooks/useTags";
+import { addDays, formatDateInput } from "../utils/date";
 
 type GoalFormState = {
   name: string;
@@ -40,6 +50,18 @@ const windowOptions: Array<{ value: TargetWindow; label: string }> = [
   { value: "day", label: "Per day" },
   { value: "week", label: "Per week" },
   { value: "month", label: "Per month" },
+];
+
+const trendRanges = [
+  { label: "Last 30", days: 30 },
+  { label: "Last 90", days: 90 },
+  { label: "Last 180", days: 180 },
+];
+
+const trendBuckets: Array<{ value: TrendBucket; label: string }> = [
+  { value: "day", label: "Day" },
+  { value: "week", label: "Week" },
+  { value: "month", label: "Month" },
 ];
 
 const createEmptyForm = (): GoalFormState => ({
@@ -97,6 +119,13 @@ export default function Goals() {
   const [tagManagementError, setTagManagementError] = useState<string | null>(null);
   const [tagActionId, setTagActionId] = useState<number | null>(null);
 
+  const [trendRangeDays, setTrendRangeDays] = useState(30);
+  const [trendBucket, setTrendBucket] = useState<TrendBucket>("day");
+  const [trendData, setTrendData] = useState<GoalTrendResponse | null>(null);
+  const [trendLoading, setTrendLoading] = useState(false);
+  const [trendError, setTrendError] = useState<string | null>(null);
+  const [trendReloadToken, setTrendReloadToken] = useState(0);
+
   const sortedGoals = useMemo(() => {
     return [...goals].sort((a, b) => {
       if (a.active !== b.active) {
@@ -143,6 +172,12 @@ export default function Goals() {
     [goals, selectedGoalId],
   );
 
+  const trendEndDate = useMemo(() => formatDateInput(new Date()), []);
+  const trendStartDate = useMemo(
+    () => addDays(trendEndDate, -(trendRangeDays - 1)),
+    [trendEndDate, trendRangeDays],
+  );
+
   useEffect(() => {
     if (selectedGoalId !== null || goalsLoading) {
       return;
@@ -171,6 +206,50 @@ export default function Goals() {
       setFormError(null);
     }
   }, [selectedGoal, selectedGoalId]);
+
+  useEffect(() => {
+    if (!selectedGoal) {
+      setTrendData(null);
+      setTrendError(null);
+      setTrendLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      setTrendLoading(true);
+      setTrendError(null);
+      setTrendData(null);
+      try {
+        const data = await getGoalTrend(
+          selectedGoal.id,
+          trendStartDate,
+          trendEndDate,
+          trendBucket,
+        );
+        if (!cancelled) {
+          setTrendData(data);
+          setTrendLoading(false);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setTrendError(getErrorMessage(error));
+          setTrendLoading(false);
+        }
+      }
+    };
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectedGoal,
+    trendBucket,
+    trendEndDate,
+    trendReloadToken,
+    trendStartDate,
+  ]);
 
   const updateForm = useCallback(
     (patch: Partial<GoalFormState>) => {
@@ -377,6 +456,10 @@ export default function Goals() {
     },
     [reloadTags, setTags, tagActionId],
   );
+
+  const handleTrendRetry = useCallback(() => {
+    setTrendReloadToken((prev) => prev + 1);
+  }, []);
 
   const loadGoalError = goalsError;
   const loadMetaError = tagsError ?? conditionsError;
@@ -856,6 +939,70 @@ export default function Goals() {
             </div>
           )}
         </div>
+
+        {selectedGoal && (
+          <div className="card trend-card">
+            <div className="trend-header">
+              <div>
+                <h2>Trend</h2>
+                <p>Momentum for {selectedGoal.name}.</p>
+              </div>
+              <div className="trend-range-summary">
+                {trendStartDate} → {trendEndDate}
+              </div>
+            </div>
+
+            <div className="trend-controls">
+              <div className="trend-control-group">
+                <div className="field-label">Range</div>
+                <div className="chip-row">
+                  {trendRanges.map((range) => (
+                    <button
+                      key={range.days}
+                      type="button"
+                      className={`toggle-chip${
+                        trendRangeDays === range.days ? " toggle-chip--active" : ""
+                      }`}
+                      onClick={() => setTrendRangeDays(range.days)}
+                      aria-pressed={trendRangeDays === range.days}
+                    >
+                      {range.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="trend-control-group">
+                <div className="field-label">Bucket</div>
+                <div className="chip-row">
+                  {trendBuckets.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`toggle-chip${
+                        trendBucket === option.value ? " toggle-chip--active" : ""
+                      }`}
+                      onClick={() => setTrendBucket(option.value)}
+                      aria-pressed={trendBucket === option.value}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {trendError && (
+              <div className="status status--error" role="alert">
+                <div>Couldn’t load trend. {trendError}</div>
+                <button className="action-button" type="button" onClick={handleTrendRetry}>
+                  Retry
+                </button>
+              </div>
+            )}
+
+            <TrendChart points={trendData?.points ?? []} loading={trendLoading} />
+          </div>
+        )}
       </div>
     </section>
   );

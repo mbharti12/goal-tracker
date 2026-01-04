@@ -101,6 +101,14 @@ export interface paths {
     /** Review Filter */
     post: operations["review_filter_review_filter_post"];
   };
+  "/goals/{goal_id}/trend": {
+    /** Get Goal Trend */
+    get: operations["get_goal_trend_goals__goal_id__trend_get"];
+  };
+  "/trends/compare": {
+    /** Compare Trends */
+    post: operations["compare_trends_trends_compare_post"];
+  };
 }
 
 export type webhooks = Record<string, never>;
@@ -327,6 +335,8 @@ export interface components {
     GoalStatusRead: {
       /** Goal Id */
       goal_id: number;
+      /** Goal Version Id */
+      goal_version_id: number;
       /** Goal Name */
       goal_name: string;
       /** Applicable */
@@ -363,6 +373,24 @@ export interface components {
       /** Weight */
       weight: number;
     };
+    /** GoalTrendResponse */
+    GoalTrendResponse: {
+      /** Goal Id */
+      goal_id: number;
+      /** Goal Name */
+      goal_name: string;
+      /**
+       * Bucket
+       * @enum {string}
+       */
+      bucket: "day" | "week" | "month";
+      /** Start */
+      start: string;
+      /** End */
+      end: string;
+      /** Points */
+      points?: components["schemas"]["TrendPoint"][];
+    };
     /** GoalUpdate */
     GoalUpdate: {
       /** Name */
@@ -379,6 +407,8 @@ export interface components {
       tags?: components["schemas"]["GoalTagInput"][] | null;
       /** Conditions */
       conditions?: components["schemas"]["GoalConditionInput"][] | null;
+      /** Effective Date */
+      effective_date?: string | null;
     };
     /** HTTPValidationError */
     HTTPValidationError: {
@@ -608,6 +638,87 @@ export interface components {
      * @enum {string}
      */
     TargetWindow: "day" | "week" | "month";
+    /** TrendCompareRequest */
+    TrendCompareRequest: {
+      /** Goal Ids */
+      goal_ids: number[];
+      /** Start */
+      start: string;
+      /** End */
+      end: string;
+      /**
+       * Bucket
+       * @default day
+       * @enum {string}
+       */
+      bucket?: "day" | "week" | "month";
+    };
+    /** TrendCompareResponse */
+    TrendCompareResponse: {
+      /**
+       * Bucket
+       * @enum {string}
+       */
+      bucket: "day" | "week" | "month";
+      /** Start */
+      start: string;
+      /** End */
+      end: string;
+      /** Series */
+      series?: components["schemas"]["TrendSeries"][];
+      /** Comparisons */
+      comparisons?: components["schemas"]["TrendComparison"][];
+    };
+    /** TrendComparison */
+    TrendComparison: {
+      /** Goal Id A */
+      goal_id_a: number;
+      /** Goal Id B */
+      goal_id_b: number;
+      /** Correlation */
+      correlation?: number | null;
+      /** N */
+      n: number;
+    };
+    /** TrendPoint */
+    TrendPoint: {
+      /** Date */
+      date: string;
+      /** Period Start */
+      period_start: string;
+      /** Period End */
+      period_end: string;
+      /** Goal Version Id */
+      goal_version_id: number;
+      /** Applicable */
+      applicable: boolean;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "met" | "partial" | "missed" | "na";
+      /** Progress */
+      progress: number;
+      /** Target */
+      target: number;
+      /** Ratio */
+      ratio: number;
+      /** Samples */
+      samples: number;
+      /** Window Days */
+      window_days: number;
+      target_window: components["schemas"]["TargetWindow"];
+      scoring_mode: components["schemas"]["ScoringMode"];
+    };
+    /** TrendSeries */
+    TrendSeries: {
+      /** Goal Id */
+      goal_id: number;
+      /** Goal Name */
+      goal_name: string;
+      /** Points */
+      points?: components["schemas"]["TrendPoint"][];
+    };
     /** ValidationError */
     ValidationError: {
       /** Location */
@@ -1169,6 +1280,55 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["ReviewFilterResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Goal Trend */
+  get_goal_trend_goals__goal_id__trend_get: {
+    parameters: {
+      query: {
+        start: string;
+        end: string;
+        bucket?: "day" | "week" | "month";
+      };
+      path: {
+        goal_id: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["GoalTrendResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Compare Trends */
+  compare_trends_trends_compare_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TrendCompareRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TrendCompareResponse"];
         };
       };
       /** @description Validation Error */
