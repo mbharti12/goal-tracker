@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session
 
 from ..db import get_session
-from ..schemas import TagCreate, TagRead
+from ..schemas import TagCreate, TagRead, TagUpdate
 from ..services import tag_service
 
 router = APIRouter(prefix="/tags", tags=["tags"])
@@ -22,6 +22,14 @@ def list_tags(
 @router.post("", response_model=TagRead, status_code=status.HTTP_201_CREATED)
 def create_tag(tag_in: TagCreate, session: Session = Depends(get_session)) -> TagRead:
     return tag_service.create_tag(session, tag_in)
+
+
+@router.put("/{tag_id}", response_model=TagRead)
+def update_tag(tag_id: int, tag_in: TagUpdate, session: Session = Depends(get_session)) -> TagRead:
+    tag = tag_service.update_tag_category(session, tag_id, tag_in)
+    if tag is None:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    return tag
 
 
 @router.put("/{tag_id}/deactivate", response_model=TagRead)

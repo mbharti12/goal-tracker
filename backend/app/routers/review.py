@@ -92,8 +92,8 @@ def _summarize_review(
         "- 3 bullets\n"
         "Mention goal performance when relevant."
     )
-    plan_json = json.dumps(plan.model_dump(), ensure_ascii=True)
-    filters_json = json.dumps(context.filters.model_dump(), ensure_ascii=True)
+    plan_json = json.dumps(plan.model_dump(), ensure_ascii=False)
+    filters_json = json.dumps(context.filters.model_dump(), ensure_ascii=False)
     user_content = "\n".join(
         [
             f"User prompt: {prompt}",

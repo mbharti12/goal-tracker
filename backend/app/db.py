@@ -44,6 +44,7 @@ def init_db() -> None:
     SQLModel.metadata.create_all(engine)
     _ensure_goal_ratings_table()
     _ensure_tags_active_column()
+    _ensure_tags_category_column()
     _ensure_goal_versions()
 
 
@@ -61,6 +62,23 @@ def _ensure_tags_active_column() -> None:
     with engine.begin() as conn:
         conn.exec_driver_sql(
             "ALTER TABLE tags ADD COLUMN active BOOLEAN NOT NULL DEFAULT 1"
+        )
+
+
+def _ensure_tags_category_column() -> None:
+    if engine.dialect.name != "sqlite":
+        return
+
+    with engine.connect() as conn:
+        result = conn.exec_driver_sql("PRAGMA table_info(tags)")
+        columns = {row[1] for row in result}
+
+    if "category" in columns:
+        return
+
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "ALTER TABLE tags ADD COLUMN category TEXT NOT NULL DEFAULT 'Other'"
         )
 
 

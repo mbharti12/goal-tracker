@@ -106,3 +106,41 @@ async def test_tag_hard_delete_guardrails(tmp_path):
 
         delete_in_use = await client.delete(f"/tags/{in_use_id}")
         assert delete_in_use.status_code == 409
+
+
+@pytest.mark.anyio
+async def test_tag_category_create_update_and_reactivate(tmp_path):
+    db_file = tmp_path / "test.db"
+    engine = create_engine(
+        f"sqlite:///{db_file}", connect_args={"check_same_thread": False}
+    )
+    app = create_app(engine_override=engine)
+    init_db()
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        create_resp = await client.post(
+            "/tags", json={"name": "focus", "category": "Mind"}
+        )
+        assert create_resp.status_code == 201
+        created = create_resp.json()
+        assert created["category"] == "Mind"
+
+        update_resp = await client.put(
+            f"/tags/{created['id']}", json={"category": "Work"}
+        )
+        assert update_resp.status_code == 200
+        assert update_resp.json()["category"] == "Work"
+
+        deactivate_resp = await client.put(f"/tags/{created['id']}/deactivate")
+        assert deactivate_resp.status_code == 200
+
+        reactivate_resp = await client.post(
+            "/tags", json={"name": "focus", "category": "Personal"}
+        )
+        assert reactivate_resp.status_code == 201
+        assert reactivate_resp.json()["active"] is True
+        assert reactivate_resp.json()["category"] == "Personal"

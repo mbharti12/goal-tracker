@@ -22,6 +22,7 @@ import type {
   ReviewFilterResponse,
   ReviewQueryRequest,
   ReviewQueryResponse,
+  TagImpactRead,
   TagCreate,
   TagEventCreate,
   TagEventDeleteResponse,
@@ -73,6 +74,9 @@ export const createCondition = (payload: ConditionCreate) =>
   apiRequest<ConditionRead>("/conditions", { method: "POST", body: payload });
 
 export const getDay = (date: string) => apiRequest<DayRead>(`/days/${date}`);
+
+export const getTagImpacts = (date: string) =>
+  apiRequest<TagImpactRead[]>(`/days/${date}/tag-impacts`);
 
 export const getCalendar = (start: string, end: string) => {
   const params = new URLSearchParams({ start, end });

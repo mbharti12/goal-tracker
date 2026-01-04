@@ -18,7 +18,10 @@ export type LlmHealthResponse = {
 type Schemas = components["schemas"];
 
 export type TagCreate = Schemas["TagCreate"];
+export type TagUpdate = Schemas["TagUpdate"];
 export type TagRead = Schemas["TagRead"];
+export type TagImpactGoalRead = Schemas["TagImpactGoalRead"];
+export type TagImpactRead = Schemas["TagImpactRead"];
 export type ConditionCreate = Schemas["ConditionCreate"];
 export type ConditionRead = Schemas["ConditionRead"];
 export type TargetWindow = Schemas["TargetWindow"];

@@ -5,7 +5,7 @@ from typing import List, Optional
 from sqlmodel import Session, select
 
 from ..models import GoalTag, Tag, TagEvent
-from ..schemas import TagCreate
+from ..schemas import TagCreate, TagUpdate
 
 
 def list_tags(session: Session, include_inactive: bool = False) -> List[Tag]:
@@ -15,18 +15,43 @@ def list_tags(session: Session, include_inactive: bool = False) -> List[Tag]:
     return session.exec(stmt).all()
 
 
+def _normalize_category(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    trimmed = value.strip()
+    return trimmed or None
+
+
 def create_tag(session: Session, tag_in: TagCreate) -> Tag:
     existing = session.exec(select(Tag).where(Tag.name == tag_in.name)).first()
+    normalized_category = _normalize_category(tag_in.category)
     if existing:
         if not existing.active:
             # Reactivate for a safer UX when a tag already exists.
             existing.active = True
+            if normalized_category is not None:
+                existing.category = normalized_category
             session.add(existing)
             session.commit()
             session.refresh(existing)
         return existing
 
-    tag = Tag(name=tag_in.name)
+    category = normalized_category or "Other"
+    tag = Tag(name=tag_in.name, category=category)
+    session.add(tag)
+    session.commit()
+    session.refresh(tag)
+    return tag
+
+
+def update_tag_category(session: Session, tag_id: int, tag_in: TagUpdate) -> Optional[Tag]:
+    tag = session.get(Tag, tag_id)
+    if tag is None:
+        return None
+    normalized_category = _normalize_category(tag_in.category)
+    if normalized_category is None:
+        return tag
+    tag.category = normalized_category
     session.add(tag)
     session.commit()
     session.refresh(tag)

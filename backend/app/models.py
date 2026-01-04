@@ -61,6 +61,7 @@ class Tag(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(unique=True, index=True)
+    category: str = Field(default="Other")
     active: bool = Field(default=True, index=True)
 
     goal_tags: List["GoalTag"] = Relationship(back_populates="tag")

@@ -14,6 +14,10 @@ from ..models import (
     DayEntry,
     Goal,
     GoalRating,
+    GoalTag,
+    GoalVersion,
+    GoalVersionTag,
+    ScoringMode,
     Tag,
     TagEvent,
     TargetWindow,
@@ -30,6 +34,8 @@ from ..schemas import (
     DayGoalRatingsUpdate,
     DayNoteUpdate,
     DayRead,
+    TagImpactGoalRead,
+    TagImpactRead,
     TagCreate,
     TagEventCreate,
     TagEventDeleteResponse,
@@ -119,6 +125,96 @@ def get_day(
         goal_ratings=goal_ratings,
         goals=goals,
     )
+
+
+@router.get("/days/{date}/tag-impacts", response_model=List[TagImpactRead])
+def get_tag_impacts(
+    date: str = Path(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    session: Session = Depends(get_session),
+) -> List[TagImpactRead]:
+    date_str = _parse_date(date)
+    goals = session.exec(select(Goal).where(Goal.active == True)).all()  # noqa: E712
+    if not goals:
+        return []
+
+    goal_ids = [goal.id for goal in goals if goal.id is not None]
+    versions_by_goal: dict[int, list[GoalVersion]] = defaultdict(list)
+    if goal_ids:
+        version_rows = session.exec(
+            select(GoalVersion).where(GoalVersion.goal_id.in_(goal_ids))
+        ).all()
+        for version in version_rows:
+            versions_by_goal[version.goal_id].append(version)
+
+    version_ids = [
+        version.id
+        for versions in versions_by_goal.values()
+        for version in versions
+        if version.id is not None
+    ]
+    version_tags_by_version: dict[int, dict[int, int]] = defaultdict(dict)
+    if version_ids:
+        for row in session.exec(
+            select(GoalVersionTag).where(GoalVersionTag.goal_version_id.in_(version_ids))
+        ).all():
+            version_tags_by_version[row.goal_version_id][row.tag_id] = row.weight
+
+    goal_tags_by_goal: dict[int, dict[int, int]] = defaultdict(dict)
+    if goal_ids:
+        for row in session.exec(
+            select(GoalTag).where(GoalTag.goal_id.in_(goal_ids))
+        ).all():
+            goal_tags_by_goal[row.goal_id][row.tag_id] = row.weight
+
+    impacts_by_tag: dict[int, list[TagImpactGoalRead]] = defaultdict(list)
+    for goal in goals:
+        versions = versions_by_goal.get(goal.id, [])
+        effective = scoring._select_effective_version(versions, date_str)
+        if effective is None and versions:
+            earliest = min(versions, key=lambda item: item.start_date)
+            latest = max(versions, key=lambda item: item.start_date)
+            effective = earliest if date_str < earliest.start_date else latest
+
+        if effective is not None:
+            scoring_mode = effective.scoring_mode
+            target_window = effective.target_window
+            tag_weights = version_tags_by_version.get(effective.id or 0, {})
+        else:
+            scoring_mode = goal.scoring_mode
+            target_window = goal.target_window
+            tag_weights = goal_tags_by_goal.get(goal.id, {})
+
+        if scoring_mode == ScoringMode.rating:
+            continue
+
+        for tag_id, weight in tag_weights.items():
+            impacts_by_tag[tag_id].append(
+                TagImpactGoalRead(
+                    goal_id=goal.id,
+                    goal_name=goal.name,
+                    target_window=target_window,
+                    scoring_mode=scoring_mode,
+                    weight=weight,
+                )
+            )
+
+    if not impacts_by_tag:
+        return []
+
+    tag_ids = list(impacts_by_tag.keys())
+    tags = session.exec(select(Tag).where(Tag.id.in_(tag_ids))).all()
+    tag_names = {tag.id: tag.name for tag in tags}
+
+    response = [
+        TagImpactRead(
+            tag_id=tag_id,
+            tag_name=tag_names.get(tag_id, "Unknown tag"),
+            goals=goals,
+        )
+        for tag_id, goals in impacts_by_tag.items()
+    ]
+    response.sort(key=lambda item: item.tag_name.lower())
+    return response
 
 
 @router.get("/calendar", response_model=List[CalendarDayRead])

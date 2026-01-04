@@ -14,6 +14,9 @@ from . import ollama_client
 
 DEFAULT_REVIEW_DAYS = 14
 MAX_REVIEW_DAYS = 60
+MAX_REVIEW_DAYS_LONG_RANGE = 180
+MAX_LLM_NOTE_CHARS_PER_DAY = 400
+MAX_LLM_NOTES_SNIPPETS_CHARS = 8000
 DOW_TO_INT = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 
 
@@ -44,8 +47,9 @@ def build_review_context(
     )
 
     truncated = False
-    if not allow_more and len(dates) > MAX_REVIEW_DAYS:
-        dates = dates[-MAX_REVIEW_DAYS:]
+    day_limit = MAX_REVIEW_DAYS_LONG_RANGE if allow_more else MAX_REVIEW_DAYS
+    if len(dates) > day_limit:
+        dates = dates[-day_limit:]
         truncated = True
 
     notes_by_date = _load_notes(session, dates)
@@ -165,14 +169,34 @@ def build_stats_table(days: Sequence[ReviewDay]) -> str:
 
 
 def build_notes_snippets(days: Sequence[ReviewDay]) -> str:
-    snippets = []
-    for day in days:
-        note = (day.note or "").strip()
-        if note:
-            snippets.append(f"{day.date}: {note}")
-    if not snippets:
+    if not days:
         return "No notes available."
-    return "\n".join(snippets)
+
+    total_chars = 0
+    kept_lines_reversed: List[str] = []
+    saw_any_note = False
+    truncated = False
+    for day in reversed(days):
+        note = (day.note or "").strip()
+        if not note:
+            continue
+        saw_any_note = True
+        note = note[:MAX_LLM_NOTE_CHARS_PER_DAY].strip()
+        line = f"{day.date}: {note}"
+        added = len(line) + (1 if kept_lines_reversed else 0)
+        if total_chars + added > MAX_LLM_NOTES_SNIPPETS_CHARS:
+            truncated = True
+            break
+        kept_lines_reversed.append(line)
+        total_chars += added
+
+    if not saw_any_note:
+        return "No notes available."
+
+    kept_lines = list(reversed(kept_lines_reversed))
+    if truncated:
+        kept_lines.insert(0, "... (older notes omitted)")
+    return "\n".join(kept_lines)
 
 
 def _build_planner_messages(

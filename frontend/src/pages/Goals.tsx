@@ -23,6 +23,7 @@ import { useConditions } from "../hooks/useConditions";
 import { useGoals } from "../hooks/useGoals";
 import { useTags } from "../hooks/useTags";
 import { addDays, formatDateInput } from "../utils/date";
+import { DEFAULT_TAG_CATEGORIES, normalizeTagCategory } from "../utils/tags";
 
 type GoalFormState = {
   name: string;
@@ -63,6 +64,8 @@ const trendBuckets: Array<{ value: TrendBucket; label: string }> = [
   { value: "week", label: "Week" },
   { value: "month", label: "Month" },
 ];
+
+const customCategoryValue = "__custom__";
 
 const createEmptyForm = (): GoalFormState => ({
   name: "",
@@ -112,6 +115,8 @@ export default function Goals() {
   const [isDeactivating, setIsDeactivating] = useState(false);
 
   const [newTagName, setNewTagName] = useState("");
+  const [newTagCategory, setNewTagCategory] = useState<string>("Other");
+  const [customTagCategory, setCustomTagCategory] = useState("");
   const [tagError, setTagError] = useState<string | null>(null);
   const [isCreatingTag, setIsCreatingTag] = useState(false);
   const [showArchivedTags, setShowArchivedTags] = useState(false);
@@ -369,6 +374,10 @@ export default function Goals() {
     if (!trimmed || isCreatingTag) {
       return;
     }
+    if (newTagCategory === customCategoryValue && !customTagCategory.trim()) {
+      setTagError("Custom category is required.");
+      return;
+    }
     const existing = tags.find(
       (tag) => tag.name.toLowerCase() === trimmed.toLowerCase(),
     );
@@ -385,7 +394,11 @@ export default function Goals() {
     setIsCreatingTag(true);
     setTagError(null);
     try {
-      const created = await createTag({ name: trimmed });
+      const resolvedCategory =
+        newTagCategory === customCategoryValue
+          ? normalizeTagCategory(customTagCategory)
+          : normalizeTagCategory(newTagCategory);
+      const created = await createTag({ name: trimmed, category: resolvedCategory });
       setTags((prev) => {
         const exists = prev.some((tag) => tag.id === created.id);
         if (exists) {
@@ -404,7 +417,16 @@ export default function Goals() {
     } finally {
       setIsCreatingTag(false);
     }
-  }, [formState.tagIds, isCreatingTag, newTagName, tags, setTags, updateForm]);
+  }, [
+    customTagCategory,
+    formState.tagIds,
+    isCreatingTag,
+    newTagCategory,
+    newTagName,
+    setTags,
+    tags,
+    updateForm,
+  ]);
 
   const handleArchiveTag = useCallback(
     async (tagId: number) => {
@@ -734,6 +756,47 @@ export default function Goals() {
                 >
                   {isCreatingTag ? "Adding…" : "Add tag"}
                 </button>
+              </div>
+              <div className="field-row">
+                <div className="field-group">
+                  <label className="field-label" htmlFor="tag-category">
+                    Category
+                  </label>
+                  <select
+                    id="tag-category"
+                    className="field"
+                    value={newTagCategory}
+                    onChange={(event) => {
+                      setNewTagCategory(event.target.value);
+                      setTagError(null);
+                    }}
+                  >
+                    {DEFAULT_TAG_CATEGORIES.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                    <option value={customCategoryValue}>Custom…</option>
+                  </select>
+                </div>
+                {newTagCategory === customCategoryValue && (
+                  <div className="field-group">
+                    <label className="field-label" htmlFor="tag-category-custom">
+                      Custom category
+                    </label>
+                    <input
+                      id="tag-category-custom"
+                      className="field"
+                      type="text"
+                      value={customTagCategory}
+                      onChange={(event) => {
+                        setCustomTagCategory(event.target.value);
+                        setTagError(null);
+                      }}
+                      placeholder="e.g. Recovery"
+                    />
+                  </div>
+                )}
               </div>
               <div className="inline-row">
                 <label className="option-card option-card--compact">

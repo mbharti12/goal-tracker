@@ -13,14 +13,47 @@ class TagBase(BaseModel):
 
 
 class TagCreate(TagBase):
-    pass
+    category: Optional[str] = None
+
+    @field_validator("category")
+    def _normalize_category(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        return trimmed or None
+
+
+class TagUpdate(BaseModel):
+    category: Optional[str] = None
+
+    @field_validator("category")
+    def _normalize_category(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        return trimmed or None
 
 
 class TagRead(TagBase):
     id: int
     active: bool
+    category: str
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TagImpactGoalRead(BaseModel):
+    goal_id: int
+    goal_name: str
+    target_window: TargetWindow
+    scoring_mode: ScoringMode
+    weight: int
+
+
+class TagImpactRead(BaseModel):
+    tag_id: int
+    tag_name: str
+    goals: List[TagImpactGoalRead] = Field(default_factory=list)
 
 
 class ConditionBase(BaseModel):

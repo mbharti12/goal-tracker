@@ -4,11 +4,18 @@ import {
   createTag,
   createTagEvent,
   deleteTagEvent,
+  getTagImpacts,
   upsertDayConditions,
   upsertDayNote,
   upsertDayRatings,
 } from "../api/endpoints";
-import type { DayGoalRatingRead, GoalStatus, TagEventRead, TagRead } from "../api/types";
+import type {
+  DayGoalRatingRead,
+  GoalStatus,
+  TagEventRead,
+  TagImpactRead,
+  TagRead,
+} from "../api/types";
 import { useRefresh } from "../context/RefreshContext";
 import { useSelectedDate } from "../context/SelectedDateContext";
 import { useToast } from "../context/ToastContext";
@@ -17,6 +24,11 @@ import { useDay } from "../hooks/useDay";
 import { useTags } from "../hooks/useTags";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { addDays, parseDateInput } from "../utils/date";
+import {
+  buildTagCategoryTabs,
+  DEFAULT_TAG_CATEGORIES,
+  normalizeTagCategory,
+} from "../utils/tags";
 
 type BannerError = {
   message: string;
@@ -63,6 +75,9 @@ const groupEmptyLabels: Record<GoalStatus["target_window"], string> = {
 };
 
 const goalGroupOrder: GoalStatus["target_window"][] = ["day", "week", "month"];
+const ratingPresets = [25, 50, 75, 100];
+const impactCountOptions = [1, 2, 3];
+const customCategoryValue = "__custom__";
 
 const clampRating = (value: number) => Math.min(100, Math.max(1, value));
 
@@ -79,6 +94,7 @@ const mergeGoalRatings = (
 export default function Today() {
   const { selectedDate, setSelectedDate } = useSelectedDate();
   const [tagQuery, setTagQuery] = useState("");
+  const [showTagSearch, setShowTagSearch] = useState(false);
   const [actionError, setActionError] = useState<BannerError | null>(null);
   const noteTimerRef = useRef<number | null>(null);
   const noteInitializedRef = useRef(false);
@@ -103,6 +119,17 @@ export default function Today() {
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [showArchivedTags, setShowArchivedTags] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string>(
+    DEFAULT_TAG_CATEGORIES[0],
+  );
+  const [newTagCategory, setNewTagCategory] = useState<string>("Other");
+  const [customTagCategory, setCustomTagCategory] = useState("");
+  const [tagImpacts, setTagImpacts] = useState<TagImpactRead[]>([]);
+  const [tagImpactsLoading, setTagImpactsLoading] = useState(false);
+  const [tagImpactsError, setTagImpactsError] = useState<string | null>(null);
+  const [drawerTag, setDrawerTag] = useState<TagRead | null>(null);
+  const [impactCount, setImpactCount] = useState(1);
+  const [impactLogging, setImpactLogging] = useState(false);
   const [ratingDrafts, setRatingDrafts] = useState<Record<number, number | null>>(
     {},
   );
@@ -132,6 +159,11 @@ export default function Today() {
       window.clearTimeout(noteTimerRef.current);
       noteTimerRef.current = null;
     }
+    setDrawerTag(null);
+    setImpactCount(1);
+    setTagImpacts([]);
+    setTagImpactsError(null);
+    setTagImpactsLoading(false);
     ratingInitializedRef.current = false;
     setRatingDrafts({});
     setRatingPendingByGoal({});
@@ -165,6 +197,35 @@ export default function Today() {
   }, [day]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const loadImpacts = async () => {
+      setTagImpactsLoading(true);
+      setTagImpactsError(null);
+      try {
+        const data = await getTagImpacts(selectedDate);
+        if (!cancelled) {
+          setTagImpacts(data);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setTagImpactsError(getErrorMessage(error));
+        }
+      } finally {
+        if (!cancelled) {
+          setTagImpactsLoading(false);
+        }
+      }
+    };
+
+    loadImpacts();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDate]);
+
+  useEffect(() => {
     return () => {
       ratingTimersRef.current.forEach((timer) => window.clearTimeout(timer));
       ratingTimersRef.current.clear();
@@ -190,6 +251,14 @@ export default function Today() {
     [sortedTags],
   );
   const pickerTags = showArchivedTags ? sortedTags : activeTags;
+  const categoryTabs = useMemo(() => buildTagCategoryTabs(tags), [tags]);
+  const tagGridTags = useMemo(
+    () =>
+      pickerTags.filter(
+        (tag) => normalizeTagCategory(tag.category) === selectedCategory,
+      ),
+    [pickerTags, selectedCategory],
+  );
   const tagStatusById = useMemo(
     () => new Map(tags.map((tag) => [tag.id, tag.active])),
     [tags],
@@ -208,7 +277,12 @@ export default function Today() {
       tag.name.toLowerCase().includes(normalizedQuery),
     );
   }, [normalizedQuery, pickerTags]);
-  const commonTags = useMemo(() => pickerTags.slice(0, 6), [pickerTags]);
+
+  useEffect(() => {
+    if (!categoryTabs.includes(selectedCategory)) {
+      setSelectedCategory(categoryTabs[0] ?? DEFAULT_TAG_CATEGORIES[0]);
+    }
+  }, [categoryTabs, selectedCategory]);
 
   const conditionSelections = useMemo(() => {
     return conditions.map((condition) => {
@@ -286,9 +360,9 @@ export default function Today() {
   );
 
   const handleAddTagEvent = useCallback(
-    async (tag: TagRead) => {
+    async (tag: TagRead, count: number = 1) => {
       try {
-        const event = await createTagEvent(selectedDate, { tag_id: tag.id, count: 1 });
+        const event = await createTagEvent(selectedDate, { tag_id: tag.id, count });
         if (day) {
           setDay((current) =>
             current
@@ -299,12 +373,14 @@ export default function Today() {
         setActionError(null);
         refreshDerivedData();
         pushToast({ type: "success", message: "Tag event added." });
+        return true;
       } catch (error) {
         setActionError({
           message: getErrorMessage(error),
-          retry: () => handleAddTagEvent(tag),
+          retry: () => handleAddTagEvent(tag, count),
         });
         pushToast({ type: "error", message: "Failed to add tag event." });
+        return false;
       }
     },
     [day, pushToast, refreshDerivedData, selectedDate, setDay],
@@ -316,8 +392,16 @@ export default function Today() {
       if (!trimmed) {
         return;
       }
+      if (newTagCategory === customCategoryValue && !customTagCategory.trim()) {
+        pushToast({ type: "error", message: "Custom category is required." });
+        return;
+      }
       try {
-        const created = await createTag({ name: trimmed });
+        const resolvedCategory =
+          newTagCategory === customCategoryValue
+            ? normalizeTagCategory(customTagCategory)
+            : normalizeTagCategory(newTagCategory);
+        const created = await createTag({ name: trimmed, category: resolvedCategory });
         setTags((prev) => {
           const exists = prev.some((tag) => tag.id === created.id);
           if (exists) {
@@ -326,7 +410,7 @@ export default function Today() {
           return [...prev, created];
         });
         setTagQuery("");
-        await handleAddTagEvent(created);
+        await handleAddTagEvent(created, 1);
       } catch (error) {
         setActionError({
           message: getErrorMessage(error),
@@ -335,7 +419,14 @@ export default function Today() {
         pushToast({ type: "error", message: "Failed to create tag." });
       }
     },
-    [handleAddTagEvent, pushToast, setTagQuery, setTags],
+    [
+      customTagCategory,
+      handleAddTagEvent,
+      newTagCategory,
+      pushToast,
+      setTagQuery,
+      setTags,
+    ],
   );
 
   const handleDeleteTagEvent = useCallback(
@@ -367,6 +458,28 @@ export default function Today() {
   );
 
   const deleteTagEventAction = useAsyncAction(handleDeleteTagEvent);
+
+  const handleOpenTagDrawer = useCallback((tag: TagRead) => {
+    setDrawerTag(tag);
+    setImpactCount(1);
+  }, []);
+
+  const handleCloseTagDrawer = useCallback(() => {
+    setDrawerTag(null);
+  }, []);
+
+  const handleLogImpact = useCallback(async () => {
+    if (!drawerTag || impactLogging) {
+      return;
+    }
+    setImpactLogging(true);
+    const success = await handleAddTagEvent(drawerTag, impactCount);
+    if (success) {
+      setDrawerTag(null);
+      setImpactCount(1);
+    }
+    setImpactLogging(false);
+  }, [drawerTag, handleAddTagEvent, impactCount, impactLogging]);
 
   const saveRating = useCallback(
     async (goalId: number, rating: number) => {
@@ -439,6 +552,24 @@ export default function Today() {
     [saveRating, savedRatingsByGoal],
   );
 
+  const handleRatingPreset = useCallback(
+    (goalId: number, value: number) => {
+      handleRatingDraftChange(goalId, value);
+    },
+    [handleRatingDraftChange],
+  );
+
+  const handleRatingAdjust = useCallback(
+    (goalId: number, delta: number) => {
+      const current =
+        ratingDrafts[goalId] ??
+        savedRatingsByGoal.get(goalId) ??
+        50;
+      handleRatingDraftChange(goalId, clampRating(current + delta));
+    },
+    [handleRatingDraftChange, ratingDrafts, savedRatingsByGoal],
+  );
+
   const saveNote = useCallback(
     async (nextNote: string) => {
       setIsSavingNote(true);
@@ -501,13 +632,44 @@ export default function Today() {
     });
   }, [day?.tag_events]);
 
-  const canAddTagEvent = Boolean(matchedTag) && !dayLoading;
+  const canOpenTag = Boolean(matchedTag) && !dayLoading;
   const canCreateTag = trimmedQuery.length > 0 && !matchedTag && !tagsLoading;
-  const emptyTagsLabel = showArchivedTags ? "No tags yet." : "No active tags yet.";
+  const emptyCategoryLabel = showArchivedTags
+    ? "No tags in this category yet."
+    : "No active tags in this category yet.";
   const noteStatus = isSavingNote ? "Saving..." : lastSavedAt ? "Saved" : "Not saved yet";
   const lastSavedLabel = lastSavedAt ? formatTime(lastSavedAt) : null;
 
   const goals = day?.goals ?? [];
+  const goalStatusById = useMemo(
+    () => new Map(goals.map((goal) => [goal.goal_id, goal])),
+    [goals],
+  );
+  const impactsByTagId = useMemo(
+    () => new Map(tagImpacts.map((impact) => [impact.tag_id, impact])),
+    [tagImpacts],
+  );
+  const selectedImpact = drawerTag ? impactsByTagId.get(drawerTag.id) : null;
+  const selectedImpactGoals = selectedImpact?.goals ?? [];
+  const impactGroups = useMemo(() => {
+    const groups: Record<GoalStatus["target_window"], typeof selectedImpactGoals> =
+      {
+        day: [],
+        week: [],
+        month: [],
+      };
+    selectedImpactGoals.forEach((goal) => {
+      groups[goal.target_window].push(goal);
+    });
+    Object.values(groups).forEach((items) =>
+      items.sort((a, b) => a.goal_name.localeCompare(b.goal_name)),
+    );
+    return goalGroupOrder.map((targetWindow) => ({
+      targetWindow,
+      label: groupLabels[targetWindow],
+      goals: groups[targetWindow],
+    }));
+  }, [selectedImpactGoals]);
   const groupedGoals = useMemo(() => {
     const groups: Record<GoalStatus["target_window"], GoalStatus[]> = {
       day: [],
@@ -611,92 +773,165 @@ export default function Today() {
         </div>
 
         <div className="card">
-          <h2>Quick add tags</h2>
-          <div className="tag-search">
-            <input
-              className="field"
-              type="text"
-              value={tagQuery}
-              onChange={(event) => setTagQuery(event.target.value)}
-              placeholder="Search tags"
-            />
-            <button
-              className="action-button action-button--primary"
-              type="button"
-              onClick={() => {
-                if (matchedTag) {
-                  handleAddTagEvent(matchedTag);
-                  setTagQuery("");
-                }
-              }}
-              disabled={!canAddTagEvent}
-            >
-              Add tag event
-            </button>
-            <button
-              className="action-button"
-              type="button"
-              onClick={() => handleCreateTagAndAdd(trimmedQuery)}
-              disabled={!canCreateTag}
-            >
-              Create tag & add
-            </button>
-          </div>
-          <div className="tag-filter-row">
-            <label className="option-card option-card--compact">
-              <input
-                type="checkbox"
-                checked={showArchivedTags}
-                onChange={(event) => setShowArchivedTags(event.target.checked)}
-              />
-              <span>Show archived tags</span>
-            </label>
-          </div>
+          <h2>Tag board</h2>
+          <div className="tag-board">
+            <div className="tag-board__tabs" role="tablist" aria-label="Tag categories">
+              {categoryTabs.map((category) => (
+                <button
+                  key={category}
+                  className={`tag-tab${
+                    selectedCategory === category ? " tag-tab--active" : ""
+                  }`}
+                  type="button"
+                  role="tab"
+                  aria-selected={selectedCategory === category}
+                  onClick={() => setSelectedCategory(category)}
+                >
+                  {category}
+                </button>
+              ))}
+            </div>
+            <div className="tag-board__controls">
+              <label className="option-card option-card--compact">
+                <input
+                  type="checkbox"
+                  checked={showArchivedTags}
+                  onChange={(event) => setShowArchivedTags(event.target.checked)}
+                />
+                <span>Show archived tags</span>
+              </label>
+              <button
+                className="action-button action-button--ghost"
+                type="button"
+                onClick={() => setShowTagSearch((prev) => !prev)}
+              >
+                {showTagSearch ? "Hide search" : "Search & create"}
+              </button>
+            </div>
 
-          {tagsLoading ? (
-            <div className="status status--loading">Loading tags...</div>
-          ) : pickerTags.length === 0 ? (
-            <div className="empty-state">{emptyTagsLabel}</div>
-          ) : (
-            <>
-              <div className="quick-tags">
-                {commonTags.map((tag) => (
+            {tagsLoading ? (
+              <div className="status status--loading">Loading tags...</div>
+            ) : tagGridTags.length === 0 ? (
+              <div className="empty-state">{emptyCategoryLabel}</div>
+            ) : (
+              <div className="tag-board__grid">
+                {tagGridTags.map((tag) => (
                   <button
                     key={tag.id}
-                    className="quick-tag"
+                    className={`tag-tile${tag.active ? "" : " tag-tile--archived"}`}
                     type="button"
-                    onClick={() => handleAddTagEvent(tag)}
+                    onClick={() => handleOpenTagDrawer(tag)}
                   >
-                    <span>{tag.name}</span>
-                    <span className="quick-tag__count">+1</span>
+                    <span className="tag-tile__name">{tag.name}</span>
+                    {!tag.active && (
+                      <span className="tag-badge tag-badge--archived">Archived</span>
+                    )}
                   </button>
                 ))}
               </div>
-              <div className="tag-list">
-                {filteredTags.map((tag) => (
-                  <div key={tag.id} className="tag-row">
-                    <div className="tag-row__name">
-                      {tag.name}
-                      {!tag.active && (
-                        <span className="tag-badge tag-badge--archived">
-                          Archived
-                        </span>
-                      )}
-                    </div>
-                    <div className="tag-row__actions">
-                      <button
-                        className="action-button action-button--ghost"
-                        type="button"
-                        onClick={() => handleAddTagEvent(tag)}
-                      >
-                        Add
-                      </button>
-                    </div>
+            )}
+
+            {showTagSearch && (
+              <div className="tag-search-panel">
+                <div className="tag-search-panel__row">
+                  <input
+                    className="field"
+                    type="text"
+                    value={tagQuery}
+                    onChange={(event) => setTagQuery(event.target.value)}
+                    placeholder="Search or create a tag"
+                  />
+                  <button
+                    className="action-button"
+                    type="button"
+                    onClick={() => {
+                      if (matchedTag) {
+                        handleOpenTagDrawer(matchedTag);
+                        setTagQuery("");
+                      }
+                    }}
+                    disabled={!canOpenTag}
+                  >
+                    Open tag
+                  </button>
+                  <button
+                    className="action-button action-button--primary"
+                    type="button"
+                    onClick={() => handleCreateTagAndAdd(trimmedQuery)}
+                    disabled={!canCreateTag}
+                  >
+                    Create tag & log
+                  </button>
+                </div>
+                <div className="tag-search-panel__row">
+                  <div className="tag-search-panel__field">
+                    <label className="field-label" htmlFor="today-tag-category">
+                      Category
+                    </label>
+                    <select
+                      id="today-tag-category"
+                      className="field"
+                      value={newTagCategory}
+                      onChange={(event) => setNewTagCategory(event.target.value)}
+                    >
+                      {DEFAULT_TAG_CATEGORIES.map((category) => (
+                        <option key={category} value={category}>
+                          {category}
+                        </option>
+                      ))}
+                      <option value={customCategoryValue}>Custom…</option>
+                    </select>
                   </div>
-                ))}
+                  {newTagCategory === customCategoryValue && (
+                    <div className="tag-search-panel__field">
+                      <label
+                        className="field-label"
+                        htmlFor="today-tag-category-custom"
+                      >
+                        Custom category
+                      </label>
+                      <input
+                        id="today-tag-category-custom"
+                        className="field"
+                        type="text"
+                        value={customTagCategory}
+                        onChange={(event) => setCustomTagCategory(event.target.value)}
+                        placeholder="e.g. Recovery"
+                      />
+                    </div>
+                  )}
+                </div>
+                {normalizedQuery && (
+                  <>
+                    {filteredTags.length === 0 ? (
+                      <div className="empty-state">No tags match your search.</div>
+                    ) : (
+                      <div className="tag-search-results">
+                        {filteredTags.map((tag) => (
+                          <button
+                            key={tag.id}
+                            className="tag-search-result"
+                            type="button"
+                            onClick={() => {
+                              handleOpenTagDrawer(tag);
+                              setTagQuery("");
+                            }}
+                          >
+                            <span>{tag.name}</span>
+                            {!tag.active && (
+                              <span className="tag-badge tag-badge--archived">
+                                Archived
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
-            </>
-          )}
+            )}
+          </div>
         </div>
 
         <div className="card">
@@ -714,80 +949,139 @@ export default function Today() {
                     <div className="empty-state">{group.emptyLabel}</div>
                   ) : (
                     <div className="goal-list">
-                      {group.goals.map((goal: GoalStatus) => (
-                        <div key={goal.goal_id} className="goal-row">
-                          <div className="goal-meta">
-                            <div className="goal-name">{goal.goal_name}</div>
-                            <div className="goal-progress">
-                              {goal.scoring_mode === "rating" ? (
-                                <>
-                                  avg {goal.progress.toFixed(1)} / {goal.target}{" "}
-                                  <span className="goal-window">
-                                    ({goal.samples}/{goal.window_days} rated,{" "}
-                                    {progressWindowLabels[goal.target_window]})
-                                  </span>
-                                </>
-                              ) : (
-                                <>
-                                  {goal.progress}/{goal.target}{" "}
-                                  <span className="goal-window">
-                                    {progressWindowLabels[goal.target_window]}
-                                  </span>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                          <div className="goal-actions">
-                            {goal.scoring_mode === "rating" && (
-                              <div
-                                className="goal-rating"
-                                aria-busy={Boolean(ratingPendingByGoal[goal.goal_id])}
-                              >
-                                <input
-                                  className="field field--compact goal-rating__input"
-                                  type="number"
-                                  min={1}
-                                  max={100}
-                                  step={1}
-                                  inputMode="numeric"
-                                  value={ratingDrafts[goal.goal_id] ?? ""}
-                                  onChange={(event) => {
-                                    const nextValue = parseRatingInput(
-                                      event.target.value,
-                                    );
-                                    handleRatingDraftChange(goal.goal_id, nextValue);
-                                  }}
-                                  onBlur={() => {
-                                    if (ratingDrafts[goal.goal_id] !== null) {
-                                      return;
-                                    }
-                                    const savedValue = savedRatingsByGoal.get(goal.goal_id);
-                                    if (savedValue === undefined) {
-                                      return;
-                                    }
-                                    setRatingDrafts((prev) => ({
-                                      ...prev,
-                                      [goal.goal_id]: savedValue,
-                                    }));
-                                  }}
-                                  placeholder="1-100"
-                                  aria-label={`Rating for ${goal.goal_name}`}
-                                  disabled={
-                                    dayLoading ||
-                                    Boolean(ratingPendingByGoal[goal.goal_id])
-                                  }
-                                />
-                                {ratingPendingByGoal[goal.goal_id] && (
-                                  <span className="goal-rating__status">Saving...</span>
+                      {group.goals.map((goal: GoalStatus) => {
+                        const ratingPending = Boolean(ratingPendingByGoal[goal.goal_id]);
+                        const ratingDisabled = dayLoading || ratingPending;
+                        const currentRating =
+                          ratingDrafts[goal.goal_id] ??
+                          savedRatingsByGoal.get(goal.goal_id) ??
+                          null;
+                        return (
+                          <div key={goal.goal_id} className="goal-row">
+                            <div className="goal-meta">
+                              <div className="goal-name">{goal.goal_name}</div>
+                              <div className="goal-progress">
+                                {goal.scoring_mode === "rating" ? (
+                                  <>
+                                    avg {goal.progress.toFixed(1)} / {goal.target}{" "}
+                                    <span className="goal-window">
+                                      ({goal.samples}/{goal.window_days} rated,{" "}
+                                      {progressWindowLabels[goal.target_window]})
+                                    </span>
+                                  </>
+                                ) : (
+                                  <>
+                                    {goal.progress}/{goal.target}{" "}
+                                    <span className="goal-window">
+                                      {progressWindowLabels[goal.target_window]}
+                                    </span>
+                                  </>
                                 )}
                               </div>
-                            )}
-                            <div className={`goal-status goal-status--${goal.status}`}>
-                              {statusLabels[goal.status]}
+                            </div>
+                            <div className="goal-actions">
+                              {goal.scoring_mode === "rating" && (
+                                <div className="goal-rating" aria-busy={ratingPending}>
+                                  <div className="goal-rating__controls">
+                                    <div className="goal-rating__presets">
+                                      {ratingPresets.map((value) => (
+                                        <button
+                                          key={value}
+                                          className={`goal-rating__button${
+                                            currentRating === value
+                                              ? " goal-rating__button--active"
+                                              : ""
+                                          }`}
+                                          type="button"
+                                          onClick={() =>
+                                            handleRatingPreset(goal.goal_id, value)
+                                          }
+                                          disabled={ratingDisabled}
+                                          aria-label={`Set ${goal.goal_name} rating to ${value}`}
+                                        >
+                                          {value}
+                                        </button>
+                                      ))}
+                                    </div>
+                                    <div className="goal-rating__stepper">
+                                      <button
+                                        className="goal-rating__step"
+                                        type="button"
+                                        onClick={() =>
+                                          handleRatingAdjust(goal.goal_id, -5)
+                                        }
+                                        disabled={ratingDisabled}
+                                        aria-label={`Decrease ${goal.goal_name} rating`}
+                                      >
+                                        -
+                                      </button>
+                                      <button
+                                        className="goal-rating__step"
+                                        type="button"
+                                        onClick={() =>
+                                          handleRatingAdjust(goal.goal_id, 5)
+                                        }
+                                        disabled={ratingDisabled}
+                                        aria-label={`Increase ${goal.goal_name} rating`}
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div className="goal-rating__input-row">
+                                    <input
+                                      className="field field--compact goal-rating__input"
+                                      type="number"
+                                      min={1}
+                                      max={100}
+                                      step={1}
+                                      inputMode="numeric"
+                                      value={ratingDrafts[goal.goal_id] ?? ""}
+                                      onChange={(event) => {
+                                        const nextValue = parseRatingInput(
+                                          event.target.value,
+                                        );
+                                        handleRatingDraftChange(
+                                          goal.goal_id,
+                                          nextValue,
+                                        );
+                                      }}
+                                      onBlur={() => {
+                                        if (ratingDrafts[goal.goal_id] !== null) {
+                                          return;
+                                        }
+                                        const savedValue = savedRatingsByGoal.get(
+                                          goal.goal_id,
+                                        );
+                                        if (savedValue === undefined) {
+                                          return;
+                                        }
+                                        setRatingDrafts((prev) => ({
+                                          ...prev,
+                                          [goal.goal_id]: savedValue,
+                                        }));
+                                      }}
+                                      placeholder="1-100"
+                                      aria-label={`Rating for ${goal.goal_name}`}
+                                      disabled={ratingDisabled}
+                                    />
+                                    {ratingPending && (
+                                      <span className="goal-rating__status">
+                                        Saving...
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              <div
+                                className={`goal-status goal-status--${goal.status}`}
+                              >
+                                {statusLabels[goal.status]}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -855,6 +1149,152 @@ export default function Today() {
           )}
         </div>
       </div>
+      {drawerTag && (
+        <div className="impact-drawer impact-drawer--open">
+          <button
+            className="impact-drawer__backdrop"
+            type="button"
+            onClick={handleCloseTagDrawer}
+            aria-label="Close impact drawer"
+          />
+          <div
+            className="impact-drawer__panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${drawerTag.name} impact`}
+          >
+            <div className="impact-drawer__header">
+              <div>
+                <div className="impact-drawer__label">Impact drawer</div>
+                <div className="impact-drawer__title">{drawerTag.name}</div>
+                <div className="impact-drawer__category">
+                  Category: {normalizeTagCategory(drawerTag.category)}
+                </div>
+              </div>
+              <button
+                className="icon-button"
+                type="button"
+                onClick={handleCloseTagDrawer}
+                aria-label="Close impact drawer"
+              >
+                &#10005;
+              </button>
+            </div>
+
+            <div className="impact-drawer__count">
+              <div className="impact-drawer__count-label">Log count</div>
+              <div className="impact-count__quick">
+                {impactCountOptions.map((count) => (
+                  <button
+                    key={count}
+                    className={`toggle-chip${
+                      impactCount === count ? " toggle-chip--active" : ""
+                    }`}
+                    type="button"
+                    onClick={() => setImpactCount(count)}
+                  >
+                    +{count}
+                  </button>
+                ))}
+              </div>
+              <div className="impact-count__stepper">
+                <button
+                  className="impact-count__step"
+                  type="button"
+                  onClick={() =>
+                    setImpactCount((prev) => Math.max(1, prev - 1))
+                  }
+                  aria-label="Decrease count"
+                  disabled={impactCount <= 1}
+                >
+                  -
+                </button>
+                <span className="impact-count__value">{impactCount}</span>
+                <button
+                  className="impact-count__step"
+                  type="button"
+                  onClick={() => setImpactCount((prev) => prev + 1)}
+                  aria-label="Increase count"
+                >
+                  +
+                </button>
+              </div>
+              <div className="impact-drawer__actions">
+                <button
+                  className="action-button action-button--primary"
+                  type="button"
+                  onClick={handleLogImpact}
+                  disabled={impactLogging || dayLoading}
+                >
+                  {impactLogging ? "Logging..." : `Log ${impactCount}`}
+                </button>
+              </div>
+            </div>
+
+            <div className="impact-drawer__impacts">
+              <div className="impact-drawer__section-title">Impacted goals</div>
+              {tagImpactsLoading ? (
+                <div className="status status--loading">Loading impacts...</div>
+              ) : tagImpactsError ? (
+                <div className="status status--error" role="alert">
+                  Couldn’t load impacts. {tagImpactsError}
+                </div>
+              ) : (
+                <div className="impact-group-list">
+                  {impactGroups.map((group) => (
+                    <div key={group.targetWindow} className="impact-group">
+                      <div className="impact-group__title">{group.label}</div>
+                      {group.goals.length === 0 ? (
+                        <div className="empty-state">No goals impacted.</div>
+                      ) : (
+                        <div className="impact-goal-list">
+                          {group.goals.map((goal) => {
+                            const status = goalStatusById.get(goal.goal_id);
+                            const currentProgress = status?.progress ?? 0;
+                            const nextProgress =
+                              currentProgress + impactCount * goal.weight;
+                            return (
+                              <div key={goal.goal_id} className="impact-goal-row">
+                                <div className="impact-goal__meta">
+                                  <div className="impact-goal__name">
+                                    {goal.goal_name}
+                                  </div>
+                                  <div className="impact-goal__details">
+                                    <span className="impact-goal__weight">
+                                      Weight {goal.weight}
+                                    </span>
+                                    {status && (
+                                      <span
+                                        className={`goal-status goal-status--${status.status}`}
+                                      >
+                                        {statusLabels[status.status]}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="impact-goal__delta">
+                                  <div className="impact-goal__progress">
+                                    {currentProgress} → {nextProgress}
+                                  </div>
+                                  {status && (
+                                    <div className="impact-goal__target">
+                                      Target {status.target}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

@@ -13,12 +13,24 @@ Release date: YYYY-MM-DD
 ### Added
 ### Changed
 ### Fixed
-- [x] Weekly/monthly progress now computes to the selected date instead of full window totals
 ### Removed
 
-## v3.0 (YYYY-MM-DD)
+## v3.1 (2026-01-04)
 
-Release date: YYYY-MM-DD
+Release date: 2026-01-04
+
+### Added
+- [x] Tag categories on tags (defaults + custom categories).
+- [x] Tag update endpoint for category changes (`PUT /tags/{tag_id}`).
+- [x] Tag impacts endpoint per day (`GET /days/{date}/tag-impacts`) using effective goal versions (excluding rating goals).
+- [x] Today UI redesign: category tabs + tag tile grid + impact drawer for click-first logging.
+
+### Changed
+- [x] Rating goals in Today are now primarily click-scored (presets and +/-) with numeric input fallback.
+
+## v3.0 (2026-01-04)
+
+Release date: 2026-01-04
 
 ### Added
 - [x] Goal definition version history with version-specific tags/conditions.
@@ -28,9 +40,9 @@ Release date: YYYY-MM-DD
 ### Changed
 - [x] Scoring now uses effective goal versions for historical dates.
 
-## v2.0 (YYYY-MM-DD)
+## v2.0 (2026-01-04)
 
-Release date: YYYY-MM-DD
+Release date: 2026-01-04
 
 ### Added
 - [x] Rating-based scoring mode for goals.
@@ -40,9 +52,9 @@ Release date: YYYY-MM-DD
 ### Changed
 - [x] Click feedback and toast notifications for key UX actions.
 
-## v1.5 (YYYY-MM-DD)
+## v1.5 (2026-01-03)
 
-Release date: YYYY-MM-DD
+Release date: 2026-01-03
 
 ### Added
 - [x] Calendar summary endpoint for daily-only cells plus weekly/monthly aggregates
@@ -55,11 +67,9 @@ Release date: YYYY-MM-DD
 - [x] Calendar and today views split daily vs weekly progress, with monthly rollups.
 - [x] Auto-refresh after actions to keep goal status and calendar aggregates current.
 
-### Fixed
+## v1.0
 
-## v1.0 (current)
-
-Release date: 01/01/2026
+Release date: 2026-01-01
 
 ### Added (baseline)
 - AI goal tracker with flexible goal definitions, daily tracking, and LLM-based summaries.

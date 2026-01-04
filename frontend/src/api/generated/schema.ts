@@ -35,6 +35,12 @@ export interface paths {
     /** Create Tag */
     post: operations["create_tag_tags_post"];
   };
+  "/tags/{tag_id}": {
+    /** Update Tag */
+    put: operations["update_tag_tags__tag_id__put"];
+    /** Delete Tag */
+    delete: operations["delete_tag_tags__tag_id__delete"];
+  };
   "/tags/{tag_id}/deactivate": {
     /** Deactivate Tag */
     put: operations["deactivate_tag_tags__tag_id__deactivate_put"];
@@ -42,10 +48,6 @@ export interface paths {
   "/tags/{tag_id}/reactivate": {
     /** Reactivate Tag */
     put: operations["reactivate_tag_tags__tag_id__reactivate_put"];
-  };
-  "/tags/{tag_id}": {
-    /** Delete Tag */
-    delete: operations["delete_tag_tags__tag_id__delete"];
   };
   "/conditions": {
     /** List Conditions */
@@ -56,6 +58,10 @@ export interface paths {
   "/days/{date}": {
     /** Get Day */
     get: operations["get_day_days__date__get"];
+  };
+  "/days/{date}/tag-impacts": {
+    /** Get Tag Impacts */
+    get: operations["get_tag_impacts_days__date__tag_impacts_get"];
   };
   "/calendar": {
     /** Get Calendar */
@@ -585,6 +591,8 @@ export interface components {
     TagCreate: {
       /** Name */
       name: string;
+      /** Category */
+      category?: string | null;
     };
     /** TagEventCreate */
     TagEventCreate: {
@@ -624,6 +632,26 @@ export interface components {
       /** Note */
       note?: string | null;
     };
+    /** TagImpactGoalRead */
+    TagImpactGoalRead: {
+      /** Goal Id */
+      goal_id: number;
+      /** Goal Name */
+      goal_name: string;
+      target_window: components["schemas"]["TargetWindow"];
+      scoring_mode: components["schemas"]["ScoringMode"];
+      /** Weight */
+      weight: number;
+    };
+    /** TagImpactRead */
+    TagImpactRead: {
+      /** Tag Id */
+      tag_id: number;
+      /** Tag Name */
+      tag_name: string;
+      /** Goals */
+      goals?: components["schemas"]["TagImpactGoalRead"][];
+    };
     /** TagRead */
     TagRead: {
       /** Name */
@@ -632,6 +660,13 @@ export interface components {
       id: number;
       /** Active */
       active: boolean;
+      /** Category */
+      category: string;
+    };
+    /** TagUpdate */
+    TagUpdate: {
+      /** Category */
+      category?: string | null;
     };
     /**
      * TargetWindow
@@ -905,6 +940,55 @@ export interface operations {
       };
     };
   };
+  /** Update Tag */
+  update_tag_tags__tag_id__put: {
+    parameters: {
+      path: {
+        tag_id: number;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TagUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TagRead"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Delete Tag */
+  delete_tag_tags__tag_id__delete: {
+    parameters: {
+      path: {
+        tag_id: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TagRead"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Deactivate Tag */
   deactivate_tag_tags__tag_id__deactivate_put: {
     parameters: {
@@ -929,28 +1013,6 @@ export interface operations {
   };
   /** Reactivate Tag */
   reactivate_tag_tags__tag_id__reactivate_put: {
-    parameters: {
-      path: {
-        tag_id: number;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["TagRead"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /** Delete Tag */
-  delete_tag_tags__tag_id__delete: {
     parameters: {
       path: {
         tag_id: number;
@@ -1016,6 +1078,28 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["DayRead"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Tag Impacts */
+  get_tag_impacts_days__date__tag_impacts_get: {
+    parameters: {
+      path: {
+        date: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TagImpactRead"][];
         };
       };
       /** @description Validation Error */
