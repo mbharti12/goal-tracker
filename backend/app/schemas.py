@@ -66,6 +66,7 @@ class ConditionCreate(ConditionBase):
 
 class ConditionRead(ConditionBase):
     id: int
+    active: bool
 
     model_config = ConfigDict(from_attributes=True)
 

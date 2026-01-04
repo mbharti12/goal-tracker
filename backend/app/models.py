@@ -84,6 +84,7 @@ class Condition(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(unique=True, index=True)
+    active: bool = Field(default=True, index=True)
 
     goal_conditions: List["GoalCondition"] = Relationship(back_populates="condition")
 

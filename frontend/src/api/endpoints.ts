@@ -68,10 +68,27 @@ export const reactivateTag = (tagId: number) =>
 export const deleteTagHard = (tagId: number) =>
   apiRequest<TagRead>(`/tags/${tagId}`, { method: "DELETE" });
 
-export const listConditions = () => apiRequest<ConditionRead[]>("/conditions");
+export const listConditions = (options?: { includeInactive?: boolean }) => {
+  const params = new URLSearchParams();
+  if (options?.includeInactive) {
+    params.set("include_inactive", "true");
+  }
+  const suffix = params.toString();
+  return apiRequest<ConditionRead[]>(suffix ? `/conditions?${suffix}` : "/conditions");
+};
 
 export const createCondition = (payload: ConditionCreate) =>
   apiRequest<ConditionRead>("/conditions", { method: "POST", body: payload });
+
+export const deactivateCondition = (conditionId: number) =>
+  apiRequest<ConditionRead>(`/conditions/${conditionId}/deactivate`, {
+    method: "PUT",
+  });
+
+export const reactivateCondition = (conditionId: number) =>
+  apiRequest<ConditionRead>(`/conditions/${conditionId}/reactivate`, {
+    method: "PUT",
+  });
 
 export const getDay = (date: string) => apiRequest<DayRead>(`/days/${date}`);
 

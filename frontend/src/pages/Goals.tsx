@@ -4,13 +4,16 @@ import { getErrorMessage } from "../api/client";
 import {
   createGoal,
   createTag,
+  deactivateCondition,
   deactivateTag,
   deleteGoal,
   getGoalTrend,
+  reactivateCondition,
   reactivateTag,
   updateGoal,
 } from "../api/endpoints";
 import type {
+  ConditionRead,
   GoalRead,
   GoalTrendResponse,
   ScoringMode,
@@ -89,8 +92,12 @@ const goalToForm = (goal: GoalRead): GoalFormState => ({
   conditionIds: goal.conditions.map((condition) => condition.condition.id),
 });
 
-const formatTarget = (goal: GoalRead) =>
-  `${goal.target_count} per ${goal.target_window}`;
+const formatTarget = (goal: GoalRead) => {
+  if (goal.scoring_mode === "rating") {
+    return `${goal.target_count}/100 per ${goal.target_window}`;
+  }
+  return `${goal.target_count} per ${goal.target_window}`;
+};
 
 const formatConditionLabel = (required: boolean, name: string) =>
   required ? name : `Not ${name}`;
@@ -102,10 +109,11 @@ export default function Goals() {
     useTags({ includeInactive: true });
   const {
     conditions,
+    setConditions,
     loading: conditionsLoading,
     error: conditionsError,
     reload: reloadConditions,
-  } = useConditions();
+  } = useConditions({ includeInactive: true });
 
   const [selectedGoalId, setSelectedGoalId] = useState<number | "new" | null>(null);
   const [formState, setFormState] = useState<GoalFormState>(() => createEmptyForm());
@@ -123,6 +131,13 @@ export default function Goals() {
   const [showArchivedManager, setShowArchivedManager] = useState(false);
   const [tagManagementError, setTagManagementError] = useState<string | null>(null);
   const [tagActionId, setTagActionId] = useState<number | null>(null);
+  const [showArchivedConditions, setShowArchivedConditions] = useState(false);
+  const [showArchivedConditionManager, setShowArchivedConditionManager] =
+    useState(false);
+  const [conditionManagementError, setConditionManagementError] = useState<
+    string | null
+  >(null);
+  const [conditionActionId, setConditionActionId] = useState<number | null>(null);
 
   const [trendRangeDays, setTrendRangeDays] = useState(30);
   const [trendBucket, setTrendBucket] = useState<TrendBucket>("day");
@@ -168,6 +183,32 @@ export default function Goals() {
     () => [...conditions].sort((a, b) => a.name.localeCompare(b.name)),
     [conditions],
   );
+  const activeConditions = useMemo(
+    () => sortedConditions.filter((condition) => condition.active),
+    [sortedConditions],
+  );
+  const archivedConditions = useMemo(
+    () => sortedConditions.filter((condition) => !condition.active),
+    [sortedConditions],
+  );
+  const conditionOptions = useMemo(() => {
+    if (showArchivedConditions) {
+      return sortedConditions;
+    }
+    const selectedArchived = sortedConditions.filter(
+      (condition) =>
+        !condition.active && formState.conditionIds.includes(condition.id),
+    );
+    const map = new Map<number, ConditionRead>();
+    activeConditions.forEach((condition) => map.set(condition.id, condition));
+    selectedArchived.forEach((condition) => map.set(condition.id, condition));
+    return Array.from(map.values());
+  }, [
+    activeConditions,
+    formState.conditionIds,
+    showArchivedConditions,
+    sortedConditions,
+  ]);
 
   const selectedGoal = useMemo(
     () =>
@@ -479,6 +520,56 @@ export default function Goals() {
     [reloadTags, setTags, tagActionId],
   );
 
+  const handleArchiveCondition = useCallback(
+    async (conditionId: number) => {
+      if (conditionActionId === conditionId) {
+        return;
+      }
+      const confirmed = window.confirm(
+        "Archive this condition? It will stay on existing goals.",
+      );
+      if (!confirmed) {
+        return;
+      }
+      setConditionActionId(conditionId);
+      setConditionManagementError(null);
+      try {
+        const updated = await deactivateCondition(conditionId);
+        setConditions((prev) =>
+          prev.map((entry) => (entry.id === updated.id ? updated : entry)),
+        );
+        await reloadConditions();
+      } catch (error) {
+        setConditionManagementError(getErrorMessage(error));
+      } finally {
+        setConditionActionId(null);
+      }
+    },
+    [conditionActionId, reloadConditions, setConditions],
+  );
+
+  const handleUnarchiveCondition = useCallback(
+    async (conditionId: number) => {
+      if (conditionActionId === conditionId) {
+        return;
+      }
+      setConditionActionId(conditionId);
+      setConditionManagementError(null);
+      try {
+        const updated = await reactivateCondition(conditionId);
+        setConditions((prev) =>
+          prev.map((entry) => (entry.id === updated.id ? updated : entry)),
+        );
+        await reloadConditions();
+      } catch (error) {
+        setConditionManagementError(getErrorMessage(error));
+      } finally {
+        setConditionActionId(null);
+      }
+    },
+    [conditionActionId, reloadConditions, setConditions],
+  );
+
   const handleTrendRetry = useCallback(() => {
     setTrendReloadToken((prev) => prev + 1);
   }, []);
@@ -488,6 +579,9 @@ export default function Goals() {
   const metaLoading = tagsLoading || conditionsLoading;
   const isCreating = selectedGoalId === "new" || selectedGoalId === null;
   const emptyTagsMessage = showArchivedTags ? "No tags yet." : "No active tags yet.";
+  const emptyConditionsMessage = showArchivedConditions
+    ? "No conditions yet. The goal will always apply."
+    : "No active conditions yet. The goal will always apply.";
   const isRating = formState.scoringMode === "rating";
 
   return (
@@ -523,72 +617,76 @@ export default function Goals() {
             </div>
           )}
 
-          <div className="goal-list">
-            {sortedGoals.map((goal) => {
-              const isSelected = goal.id === selectedGoalId;
-              const tagsLabel =
-                goal.tags.length > 0
-                  ? goal.tags.map((tag) => tag.tag.name)
-                  : ["No tags yet"];
-              const conditionsLabel =
-                goal.conditions.length > 0
-                  ? goal.conditions.map((condition) =>
-                      formatConditionLabel(
-                        condition.required_value,
-                        condition.condition.name,
-                      ),
-                    )
-                  : ["Always applicable"];
+          <div className="goals-tile-list">
+            <div className="goal-list">
+              {sortedGoals.map((goal) => {
+                const isSelected = goal.id === selectedGoalId;
+                const tagsLabel =
+                  goal.tags.length > 0
+                    ? goal.tags.map((tag) => tag.tag.name)
+                    : ["No tags yet"];
+                const conditionsLabel =
+                  goal.conditions.length > 0
+                    ? goal.conditions.map((condition) =>
+                        formatConditionLabel(
+                          condition.required_value,
+                          condition.condition.name,
+                        ),
+                      )
+                    : ["Always applicable"];
 
-              return (
-                <button
-                  key={goal.id}
-                  type="button"
-                  className={`goal-tile${isSelected ? " goal-tile--active" : ""}`}
-                  onClick={() => handleSelectGoal(goal.id)}
-                >
-                  <div className="goal-tile__header">
-                    <div className="goal-tile__name">{goal.name}</div>
-                    <div className="goal-tile__target">{formatTarget(goal)}</div>
-                  </div>
-                  <div className="goal-tile__meta">
-                    <span
-                      className={`goal-badge${
-                        goal.active ? "" : " goal-badge--inactive"
-                      }`}
-                    >
-                      {goal.active ? "Active" : "Inactive"}
-                    </span>
-                    <span>Scoring: {goal.scoring_mode}</span>
-                    {goal.description && <span>{goal.description}</span>}
-                  </div>
-                  <div className="goal-tile__chips">
-                    {tagsLabel.map((label) => (
+                return (
+                  <button
+                    key={goal.id}
+                    type="button"
+                    className={`goal-tile${isSelected ? " goal-tile--active" : ""}`}
+                    onClick={() => handleSelectGoal(goal.id)}
+                  >
+                    <div className="goal-tile__header">
+                      <div className="goal-tile__name">{goal.name}</div>
+                      <div className="goal-tile__target">{formatTarget(goal)}</div>
+                    </div>
+                    <div className="goal-tile__meta">
                       <span
-                        key={`${goal.id}-tag-${label}`}
-                        className={`goal-pill${
-                          label === "No tags yet" ? " goal-pill--empty" : ""
+                        className={`goal-badge${
+                          goal.active ? "" : " goal-badge--inactive"
                         }`}
                       >
-                        {label}
+                        {goal.active ? "Active" : "Inactive"}
                       </span>
-                    ))}
-                  </div>
-                  <div className="goal-tile__chips">
-                    {conditionsLabel.map((label) => (
-                      <span
-                        key={`${goal.id}-condition-${label}`}
-                        className={`goal-pill goal-pill--condition${
-                          label === "Always applicable" ? " goal-pill--empty" : ""
-                        }`}
-                      >
-                        {label}
-                      </span>
-                    ))}
-                  </div>
-                </button>
-              );
-            })}
+                      <span>Scoring: {goal.scoring_mode}</span>
+                      {goal.description && <span>{goal.description}</span>}
+                    </div>
+                    <div className="goal-tile__chips">
+                      {tagsLabel.map((label) => (
+                        <span
+                          key={`${goal.id}-tag-${label}`}
+                          className={`goal-pill${
+                            label === "No tags yet" ? " goal-pill--empty" : ""
+                          }`}
+                        >
+                          {label}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="goal-tile__chips">
+                      {conditionsLabel.map((label) => (
+                        <span
+                          key={`${goal.id}-condition-${label}`}
+                          className={`goal-pill goal-pill--condition${
+                            label === "Always applicable"
+                              ? " goal-pill--empty"
+                              : ""
+                          }`}
+                        >
+                          {label}
+                        </span>
+                      ))}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
@@ -852,6 +950,18 @@ export default function Goals() {
               <div className="field-hint">
                 Goal applies only when all selected conditions are true.
               </div>
+              <div className="inline-row">
+                <label className="option-card option-card--compact">
+                  <input
+                    type="checkbox"
+                    checked={showArchivedConditions}
+                    onChange={(event) =>
+                      setShowArchivedConditions(event.target.checked)
+                    }
+                  />
+                  <span>Show archived conditions</span>
+                </label>
+              </div>
               {conditionsLoading ? (
                 <div className="status status--loading">Loading conditions…</div>
               ) : conditionsError ? (
@@ -865,13 +975,11 @@ export default function Goals() {
                     Retry
                   </button>
                 </div>
-              ) : sortedConditions.length === 0 ? (
-                <div className="status status--loading">
-                  No conditions yet. The goal will always apply.
-                </div>
+              ) : conditionOptions.length === 0 ? (
+                <div className="status status--loading">{emptyConditionsMessage}</div>
               ) : (
                 <div className="chip-row">
-                  {sortedConditions.map((condition) => {
+                  {conditionOptions.map((condition) => {
                     const isActive = formState.conditionIds.includes(condition.id);
                     return (
                       <button
@@ -888,6 +996,7 @@ export default function Goals() {
                         aria-pressed={isActive}
                       >
                         {condition.name}
+                        {!condition.active && " (archived)"}
                       </button>
                     );
                   })}
@@ -999,6 +1108,110 @@ export default function Goals() {
           {tagManagementError && (
             <div className="status status--error" role="alert">
               {tagManagementError}
+            </div>
+          )}
+        </div>
+
+        <div className="card condition-management">
+          <div className="condition-management__header">
+            <div>
+              <h2>Condition management</h2>
+              <p>Archive conditions to hide them while keeping goal history.</p>
+            </div>
+            <label className="option-card option-card--compact">
+              <input
+                type="checkbox"
+                checked={showArchivedConditionManager}
+                onChange={(event) =>
+                  setShowArchivedConditionManager(event.target.checked)
+                }
+              />
+              <span>Show archived</span>
+            </label>
+          </div>
+
+          {conditionsLoading ? (
+            <div className="status status--loading">Loading conditions…</div>
+          ) : conditionsError ? (
+            <div className="status status--error" role="alert">
+              <div>Couldn’t load conditions. {conditionsError}</div>
+              <button
+                className="action-button"
+                type="button"
+                onClick={reloadConditions}
+              >
+                Retry
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="condition-management__section">
+                <div className="condition-management__section-title">
+                  Active conditions
+                </div>
+                {activeConditions.length === 0 ? (
+                  <div className="empty-state">No active conditions right now.</div>
+                ) : (
+                  <div className="condition-management__list">
+                    {activeConditions.map((condition) => (
+                      <div
+                        key={condition.id}
+                        className="condition-management__row"
+                      >
+                        <span>{condition.name}</span>
+                        <button
+                          className="action-button action-button--ghost"
+                          type="button"
+                          onClick={() => handleArchiveCondition(condition.id)}
+                          disabled={conditionActionId === condition.id}
+                        >
+                          {conditionActionId === condition.id
+                            ? "Archiving…"
+                            : "Archive"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {showArchivedConditionManager && (
+                <div className="condition-management__section">
+                  <div className="condition-management__section-title">
+                    Archived conditions
+                  </div>
+                  {archivedConditions.length === 0 ? (
+                    <div className="empty-state">No archived conditions.</div>
+                  ) : (
+                    <div className="condition-management__list">
+                      {archivedConditions.map((condition) => (
+                        <div
+                          key={condition.id}
+                          className="condition-management__row"
+                        >
+                          <span>{condition.name}</span>
+                          <button
+                            className="action-button action-button--ghost"
+                            type="button"
+                            onClick={() => handleUnarchiveCondition(condition.id)}
+                            disabled={conditionActionId === condition.id}
+                          >
+                            {conditionActionId === condition.id
+                              ? "Restoring…"
+                              : "Unarchive"}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
+          {conditionManagementError && (
+            <div className="status status--error" role="alert">
+              {conditionManagementError}
             </div>
           )}
         </div>

@@ -15,6 +15,31 @@ Release date: YYYY-MM-DD
 ### Fixed
 ### Removed
 
+## v3.2 (2026-01-04)
+
+Release date: 2026-01-04
+
+### Added
+- [x] Condition archiving support with active flag on `Condition` and `ConditionRead`.
+- [x] Condition archive/reactivate endpoints (`PUT /conditions/{condition_id}/deactivate`, `PUT /conditions/{condition_id}/reactivate`) and `include_inactive` support on `GET /conditions`.
+- [x] Goals UI condition management section mirroring tag management with archive/unarchive confirmations.
+- [x] Goals conditions selector toggle to show archived conditions while always keeping selected archived conditions visible.
+- [x] SQLite auto-migration to add `conditions.active` column and index on startup for older DB files.
+- [x] Backend tests covering condition archive/rehydrate behavior.
+
+### Changed
+- [x] Calendar header layout now right-justifies the Monthly goals summary card while keeping responsive wrap behavior.
+- [x] Goals tile target formatting shows rating targets as `{threshold}/100 per {window}` while keeping count/binary unchanged.
+- [x] Goals left column now scrolls the tile list without scrolling the header.
+- [x] `useConditions` supports options (including inactive) and exposes `setConditions` for UI updates.
+- [x] Condition list queries now default to active-only unless `include_inactive=true`.
+
+### Fixed
+- [x] Prevented archived conditions from being dropped when editing existing goals.
+
+### Removed
+- [x] Rating preset and +/- stepper buttons under Today’s “Goals progress” (numeric input remains).
+
 ## v3.1 (2026-01-04)
 
 Release date: 2026-01-04

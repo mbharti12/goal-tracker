@@ -9,7 +9,7 @@ type ConditionsState = {
   error: string | null;
 };
 
-export function useConditions() {
+export function useConditions(options?: { includeInactive?: boolean }) {
   const [state, setState] = useState<ConditionsState>({
     conditions: [],
     loading: true,
@@ -19,12 +19,12 @@ export function useConditions() {
   const reload = useCallback(async () => {
     setState((prev) => ({ ...prev, loading: true, error: null }));
     try {
-      const data = await listConditions();
+      const data = await listConditions(options);
       setState({ conditions: data, loading: false, error: null });
     } catch (error) {
       setState({ conditions: [], loading: false, error: getErrorMessage(error) });
     }
-  }, []);
+  }, [options?.includeInactive]);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,7 +32,7 @@ export function useConditions() {
     const load = async () => {
       setState((prev) => ({ ...prev, loading: true, error: null }));
       try {
-        const data = await listConditions();
+        const data = await listConditions(options);
         if (!cancelled) {
           setState({ conditions: data, loading: false, error: null });
         }
@@ -52,10 +52,18 @@ export function useConditions() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [options?.includeInactive]);
 
   return {
     conditions: state.conditions,
+    setConditions: (
+      updater: ((prev: ConditionRead[]) => ConditionRead[]) | ConditionRead[],
+    ) => {
+      setState((prev) => ({
+        ...prev,
+        conditions: typeof updater === "function" ? updater(prev.conditions) : updater,
+      }));
+    },
     loading: state.loading,
     error: state.error,
     reload,

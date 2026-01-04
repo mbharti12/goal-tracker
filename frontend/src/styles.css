@@ -709,6 +709,12 @@ body {
   gap: 12px;
 }
 
+.goals-tile-list {
+  max-height: calc(100vh - 300px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 .goal-group-list {
   display: flex;
   flex-direction: column;
@@ -1425,11 +1431,13 @@ body {
   align-items: center;
 }
 
-.tag-management {
+.tag-management,
+.condition-management {
   grid-column: 1 / -1;
 }
 
-.tag-management__header {
+.tag-management__header,
+.condition-management__header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -1438,32 +1446,37 @@ body {
   margin-bottom: 12px;
 }
 
-.tag-management__header p {
+.tag-management__header p,
+.condition-management__header p {
   margin: 0;
   color: var(--muted);
 }
 
-.tag-management__section {
+.tag-management__section,
+.condition-management__section {
   display: flex;
   flex-direction: column;
   gap: 10px;
   margin-bottom: 14px;
 }
 
-.tag-management__section-title {
+.tag-management__section-title,
+.condition-management__section-title {
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
 }
 
-.tag-management__list {
+.tag-management__list,
+.condition-management__list {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.tag-management__row {
+.tag-management__row,
+.condition-management__row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1478,12 +1491,16 @@ body {
   .goals-layout {
     grid-template-columns: 1fr;
   }
+
+  .goals-tile-list {
+    max-height: none;
+  }
 }
 
 .calendar-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 16px;
   flex-wrap: wrap;
 }
@@ -1520,6 +1537,7 @@ body {
   border-radius: 16px;
   padding: 12px 14px;
   min-width: 160px;
+  margin-left: auto;
   display: flex;
   flex-direction: column;
   gap: 6px;

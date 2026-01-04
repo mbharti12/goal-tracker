@@ -75,7 +75,6 @@ const groupEmptyLabels: Record<GoalStatus["target_window"], string> = {
 };
 
 const goalGroupOrder: GoalStatus["target_window"][] = ["day", "week", "month"];
-const ratingPresets = [25, 50, 75, 100];
 const impactCountOptions = [1, 2, 3];
 const customCategoryValue = "__custom__";
 
@@ -552,24 +551,6 @@ export default function Today() {
     [saveRating, savedRatingsByGoal],
   );
 
-  const handleRatingPreset = useCallback(
-    (goalId: number, value: number) => {
-      handleRatingDraftChange(goalId, value);
-    },
-    [handleRatingDraftChange],
-  );
-
-  const handleRatingAdjust = useCallback(
-    (goalId: number, delta: number) => {
-      const current =
-        ratingDrafts[goalId] ??
-        savedRatingsByGoal.get(goalId) ??
-        50;
-      handleRatingDraftChange(goalId, clampRating(current + delta));
-    },
-    [handleRatingDraftChange, ratingDrafts, savedRatingsByGoal],
-  );
-
   const saveNote = useCallback(
     async (nextNote: string) => {
       setIsSavingNote(true);
@@ -952,10 +933,6 @@ export default function Today() {
                       {group.goals.map((goal: GoalStatus) => {
                         const ratingPending = Boolean(ratingPendingByGoal[goal.goal_id]);
                         const ratingDisabled = dayLoading || ratingPending;
-                        const currentRating =
-                          ratingDrafts[goal.goal_id] ??
-                          savedRatingsByGoal.get(goal.goal_id) ??
-                          null;
                         return (
                           <div key={goal.goal_id} className="goal-row">
                             <div className="goal-meta">
@@ -982,52 +959,6 @@ export default function Today() {
                             <div className="goal-actions">
                               {goal.scoring_mode === "rating" && (
                                 <div className="goal-rating" aria-busy={ratingPending}>
-                                  <div className="goal-rating__controls">
-                                    <div className="goal-rating__presets">
-                                      {ratingPresets.map((value) => (
-                                        <button
-                                          key={value}
-                                          className={`goal-rating__button${
-                                            currentRating === value
-                                              ? " goal-rating__button--active"
-                                              : ""
-                                          }`}
-                                          type="button"
-                                          onClick={() =>
-                                            handleRatingPreset(goal.goal_id, value)
-                                          }
-                                          disabled={ratingDisabled}
-                                          aria-label={`Set ${goal.goal_name} rating to ${value}`}
-                                        >
-                                          {value}
-                                        </button>
-                                      ))}
-                                    </div>
-                                    <div className="goal-rating__stepper">
-                                      <button
-                                        className="goal-rating__step"
-                                        type="button"
-                                        onClick={() =>
-                                          handleRatingAdjust(goal.goal_id, -5)
-                                        }
-                                        disabled={ratingDisabled}
-                                        aria-label={`Decrease ${goal.goal_name} rating`}
-                                      >
-                                        -
-                                      </button>
-                                      <button
-                                        className="goal-rating__step"
-                                        type="button"
-                                        onClick={() =>
-                                          handleRatingAdjust(goal.goal_id, 5)
-                                        }
-                                        disabled={ratingDisabled}
-                                        aria-label={`Increase ${goal.goal_name} rating`}
-                                      >
-                                        +
-                                      </button>
-                                    </div>
-                                  </div>
                                   <div className="goal-rating__input-row">
                                     <input
                                       className="field field--compact goal-rating__input"
